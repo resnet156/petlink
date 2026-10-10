@@ -7,6 +7,7 @@ import { useMapEditor } from './useMapEditor'
 import { seedHomeMap } from '@/domain/seed'
 import { clone } from '@/domain/geometry'
 import { downscaleDataUrl } from '@/lib/image'
+import { FURNITURE_PALETTE, FURNITURE_META } from '@/components/map/furnitureLib'
 
 type Tab = 'upload' | 'draw' | 'scan' | 'bind'
 const MAX_IMG = 8 * 1024 * 1024
@@ -126,10 +127,40 @@ export function MapBuilderModal() {
               <button className={`btn ${editor.tool === 'rect' ? 'btn-primary' : ''}`} onClick={() => editor.setTool('rect')}>▭ 拖拽画房间</button>
               <button className={`btn ${editor.tool === 'poly' ? 'btn-primary' : ''}`} onClick={() => editor.setTool('poly')}>⌁ 自由多边形</button>
               <button className={`btn ${editor.tool === 'select' ? 'btn-primary' : ''}`} onClick={() => editor.setTool('select')}>↖ 调整布局</button>
+              <button className={`btn ${editor.tool === 'furniture' ? 'btn-primary' : ''}`} data-testid="tool-furniture" onClick={() => editor.setTool('furniture')}>🛋 布置家具</button>
               <button className="btn" onClick={() => editor.load(homeMap.rooms)}>↺ 载入当前</button>
               <button className="btn" onClick={editor.undo}>↶ 撤销</button>
               <button className="btn" onClick={editor.redo}>↷ 重做</button>
             </div>
+            {editor.tool === 'furniture' && (
+              <div className="mb-2 rounded-xl border border-[#dbe7e1] bg-[#f4f8f6] p-2.5">
+                {editor.selected < 0 ? (
+                  <div className="text-[11px] text-muted">先在上方「调整布局」选中一个房间，再回到这里布置家具。</div>
+                ) : (
+                  <>
+                    <div className="mb-1.5 text-[11px] text-muted">点击家具拖动摆放；拖右下角手柄缩放；选中后可旋转/删除；从下方添加。</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {FURNITURE_PALETTE.map((t) => (
+                        <button key={t} className="rounded-lg border border-line bg-white px-2 py-1 text-[11px] hover:border-teal-2" onClick={() => editor.addFurniture(t)}>
+                          ＋ {FURNITURE_META[t].label}
+                        </button>
+                      ))}
+                    </div>
+                    {editor.selectedFurn >= 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-[#dbe7e1] pt-2">
+                        <button className="btn !py-1.5 !text-[11px]" onClick={() => editor.resizeFurn(1.12, 1)}>宽+</button>
+                        <button className="btn !py-1.5 !text-[11px]" onClick={() => editor.resizeFurn(0.9, 1)}>宽-</button>
+                        <button className="btn !py-1.5 !text-[11px]" onClick={() => editor.resizeFurn(1, 1.12)}>高+</button>
+                        <button className="btn !py-1.5 !text-[11px]" onClick={() => editor.resizeFurn(1, 0.9)}>高-</button>
+                        <button className="btn !py-1.5 !text-[11px]" onClick={() => editor.rotateFurn(-45)}>↺ 旋转</button>
+                        <button className="btn !py-1.5 !text-[11px]" onClick={() => editor.rotateFurn(45)}>↻ 旋转</button>
+                        <button className="btn btn-red !py-1.5 !text-[11px]" data-testid="furn-delete" onClick={editor.deleteFurn}>删除家具</button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <EditorCanvas editor={editor} bgImage={bgImage} />
             <div className="mt-2 flex gap-1.5">
               <button className="btn" disabled={editor.polyDraft.length < 3} onClick={() => editor.finishPoly()}>完成当前自由形状</button>

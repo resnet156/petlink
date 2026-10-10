@@ -1,0 +1,34 @@
+{
+  "TripoSR": {
+    "repository": "https://huggingface.co/stabilityai/TripoSR",
+    "revision": "5b521936b01fbe1890f6f9baed0254ab6351c04a",
+    "file": "model.ckpt",
+    "size": 1677246742,
+    "sha256": "429e2c6b22a0923967459de24d67f05962b235f79cde6b032aa7ed2ffcd970ee",
+    "license": "MIT"
+  },
+  "DepthAnythingV2Small": {
+    "repository": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small",
+    "revision": "03876f8651c73a60fe4c2c48294e09fcb6838fcf",
+    "file": "depth_anything_v2_vits.pth",
+    "size": 99218434,
+    "sha256": "715fade13be8f229f8a70cc02066f656f2423a59effd0579197bbf57860e1378",
+    "license": "Apache-2.0"
+  },
+  "U2Net": {
+    "repository": "https://github.com/danielgatis/rembg",
+    "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx",
+    "size": 175997641,
+    "license": "Apache-2.0 (U-2-Net), MIT (rembg wrapper)",
+    "verification": "Verified against the known MD5 in official rembg 2.0.85 U2netSession.download_models and recorded SHA-256.",
+    "sha256": "8d10d2f3bb75ae3b6d527c77944fc5e7dcd94b29809d47a739a7a728a912b491",
+    "upstreamKnownMd5": "60024c5c889badc19c04ad937298a77b"
+  },
+  "DinoViTConfig": {
+    "repository": "https://huggingface.co/facebook/dino-vitb16",
+    "revision": "f205d5d8e640a89a2b8ef0369670dfc37cc07fc2",
+    "file": "config.json",
+    "note": "Configuration only; DINO parameters are already contained in the TripoSR checkpoint.",
+    "sha256": "b87c0270b97db085fd82cf114a761fd0f62ae7914fbd407c752a2260646b689c"
+  }
+}

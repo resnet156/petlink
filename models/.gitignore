@@ -1,0 +1,11 @@
+.venv/
+.private/
+vendor/
+__pycache__/
+*.pyc
+*.log
+outputs/
+*.glb
+*.ckpt
+*.pth
+*.onnx

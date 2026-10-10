@@ -32,9 +32,9 @@ export function TrailDrawer() {
           <button className="grid h-9 w-9 place-items-center rounded-xl bg-[#edf2ef] text-[#6e7f79]" onClick={() => toggleDrawer(false)}>×</button>
         </div>
         <div className="my-4 grid grid-cols-3 gap-1.5 rounded-2xl border border-[#d9e8e2] bg-gradient-to-br from-[#e6f4ef] to-[#f7fbf8] p-3.5 text-center">
-          <div><b className="block text-base">{sum.roomChanges}</b><span className="text-[10px] text-muted">房间切换</span></div>
-          <div><b className="block text-base">{events.length}</b><span className="text-[10px] text-muted">关键事件</span></div>
-          <div><b className="block text-base">{sum.plays}</b><span className="text-[10px] text-muted">玩耍</span></div>
+          <div><b className="block text-base">{sum.roomChanges}</b><span className="text-[12px] text-muted">房间切换</span></div>
+          <div><b className="block text-base">{events.length}</b><span className="text-[12px] text-muted">关键事件</span></div>
+          <div><b className="block text-base">{sum.plays}</b><span className="text-[12px] text-muted">玩耍</span></div>
         </div>
 
         <div className="flex-1 overflow-auto pb-10 pr-1">
@@ -53,7 +53,7 @@ export function TrailDrawer() {
                 )}
               </button>
               {(e.type === 'room_change' || e.type === 'bell') && (
-                <button className="mt-1.5 text-[10px] font-bold text-teal" onClick={() => openCamera()}>跳到对应摄像头 →</button>
+                <button className="mt-1.5 text-[12px] font-bold text-teal" onClick={() => openCamera()}>跳到对应摄像头 →</button>
               )}
             </div>
           ))}

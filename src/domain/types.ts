@@ -34,6 +34,36 @@ export type RoomEnvironment = {
 /** 房间语义类型，仅影响默认家具示意与图标，绝不写死房间名逻辑 */
 export type RoomKind = 'living' | 'bedroom' | 'study' | 'balcony' | 'dining' | 'custom'
 
+export type FurnitureType =
+  | 'sofa'
+  | 'coffee_table'
+  | 'tv'
+  | 'rug'
+  | 'bed'
+  | 'nightstand'
+  | 'wardrobe'
+  | 'desk'
+  | 'chair'
+  | 'bookshelf'
+  | 'dining_table'
+  | 'cabinet'
+  | 'fridge'
+  | 'plant'
+  | 'cat_tree'
+  | 'litter'
+  | 'rug_round'
+
+/** 一件家具：绝对地图坐标 (x,y 左上角) + 尺寸 + 旋转角(度) */
+export type FurnitureItem = {
+  id: string
+  type: FurnitureType
+  x: number
+  y: number
+  w: number
+  h: number
+  rotation?: number
+}
+
 export type Room = {
   id: string
   name: string
@@ -41,6 +71,8 @@ export type Room = {
   polygon: Point[]
   /** 绑定到该房间的 deviceId 列表（Device 亦持有 roomId，双向一致） */
   devices: string[]
+  /** 可编辑家具；缺省时按房间类型自动生成示意 */
+  furniture?: FurnitureItem[]
   environment: RoomEnvironment
 }
 
@@ -56,6 +88,9 @@ export type HomeMap = {
 
 export type PetBehavior =
   | 'idle'
+  | 'walking'
+  | 'shaking'
+  | 'unknown'
   | 'looking'
   | 'running'
   | 'sleeping'
@@ -76,6 +111,12 @@ export type PetState = {
   lastUpdatedAt: number
   trackingSources: TrackingSource[]
   collarBattery: number
+  /** 资料：用于寻宠卡片等（可选） */
+  species?: string
+  furColor?: string
+  collarColor?: string
+  /** 宠物照片 dataURL（可上传；缺省用形象） */
+  photo?: string
 }
 
 export type PetEventType =
@@ -133,6 +174,8 @@ export type TransitionRoute = {
   to: Point
   fromRoomId: string
   toRoomId: string
+  petId: string
+  path: Point[]
 } | null
 
 // ---- 虚拟围栏 ----
@@ -140,6 +183,10 @@ export type Fence = {
   points: Point[]
   mapVersion: number
   enabled: boolean
+  /** 用户是否手动自定义过（自定义后不被户型变更静默覆盖） */
+  custom?: boolean
+  /** 户型发生较大变化、围栏可能不再适用，需用户复核 */
+  needsReview?: boolean
 }
 
 // ---- 自动化规则 ----
@@ -194,6 +241,17 @@ export type LostMode = {
   active: boolean
   lastRoomId?: string
   lastUpdatedAt?: number
+}
+
+// ---- 宠物主动找人：拨铃 → 设备播报 → 推送主人 → 等待回应 的完整链路 ----
+export type FindOwnerState = {
+  active: boolean
+  /** 0 空闲；1 宠物拨铃；2 设备播报；3 已推送主人；4 等待/已回应 */
+  step: number
+  deviceName: string
+  roomName: string
+  petName: string
+  startedAt?: number
 }
 
 export type ToastKind = 'success' | 'info' | 'warn' | 'error'

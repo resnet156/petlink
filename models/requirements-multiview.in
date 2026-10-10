@@ -1,0 +1,3 @@
+# Optional CPU photogrammetry and inspection plots. Main pet/room jobs do not import these.
+pycolmap==4.2.1
+matplotlib==3.11.2

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { roomBounds } from '@/domain/geometry'
 import type { Room } from '@/domain/types'
 import type { useMapEditor } from './useMapEditor'
@@ -16,6 +17,7 @@ const KINDS: { value: Room['kind']; label: string }[] = [
 export function InspectorPanel({ editor }: { editor: Editor }) {
   const { rooms, selected } = editor
   const room = selected >= 0 ? rooms[selected] : undefined
+  const [confirmDel, setConfirmDel] = useState<number>(-1)
 
   return (
     <div className="flex max-h-[440px] flex-col gap-2 overflow-auto rounded-[18px] border border-line bg-[#f3f7f4] p-3">
@@ -48,14 +50,35 @@ export function InspectorPanel({ editor }: { editor: Editor }) {
             onFocus={() => editor.setSelected(i)}
             onChange={(e) => { editor.setSelected(i); editor.renameAt(i, e.target.value) }}
           />
-          <button className="rounded-lg bg-teal-soft px-2 py-1 text-[10px] text-teal" onClick={() => editor.setSelected(i)}>
+          <button className="rounded-lg bg-teal-soft px-2 py-1 text-[12px] text-teal" onClick={() => editor.setSelected(i)}>
             编辑
           </button>
-          <button className="rounded-lg bg-[#edf2ef] py-1 text-[#60726b]" aria-label="删除" onClick={() => { editor.setSelected(i); editor.remove() }}>
+          <button
+            className="rounded-lg bg-[#edf2ef] py-1 text-[#60726b]"
+            aria-label="删除"
+            data-testid="room-del"
+            onClick={() => setConfirmDel(i)}
+          >
             ×
           </button>
         </div>
       ))}
+
+      {confirmDel >= 0 && rooms[confirmDel] && (
+        <div data-testid="room-del-confirm" className="rounded-xl border border-[#f0cfca] bg-[#fdeeec] p-2.5 text-[11px] text-[#9c413a]">
+          <div className="mb-2">确认删除房间「{rooms[confirmDel].name}」？该操作可通过“撤销”恢复。</div>
+          <div className="flex gap-1.5">
+            <button className="btn !py-1.5 !text-[11px]" onClick={() => setConfirmDel(-1)}>取消</button>
+            <button
+              className="btn btn-red !py-1.5 !text-[11px]"
+              data-testid="room-del-ok"
+              onClick={() => { editor.setSelected(confirmDel); editor.remove(); setConfirmDel(-1) }}
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      )}
 
       {room && (
         <div data-testid="room-inspector" className="mt-1 rounded-2xl border border-[#dbe7e1] bg-[#f4f8f6] p-3">
@@ -65,11 +88,11 @@ export function InspectorPanel({ editor }: { editor: Editor }) {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-[9px] text-muted">房间名称</label>
+              <label className="mb-1 block text-[11px] text-muted">房间名称</label>
               <input className="field !py-2 text-[11px]" value={room.name} onChange={(e) => editor.setName(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-[9px] text-muted">房间类型 / 家具</label>
+              <label className="mb-1 block text-[11px] text-muted">房间类型 / 家具</label>
               <select className="field !py-2 text-[11px]" value={room.kind} onChange={(e) => editor.setKind(e.target.value as Room['kind'])}>
                 {KINDS.map((k) => (
                   <option key={k.value} value={k.value}>{k.label}</option>
@@ -78,34 +101,25 @@ export function InspectorPanel({ editor }: { editor: Editor }) {
             </div>
           </div>
           <div className="mt-2 grid grid-cols-4 gap-1.5">
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.nudge(-15, 0)}>← 左</button>
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.nudge(15, 0)}>右 →</button>
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.nudge(0, -15)}>↑ 上</button>
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.nudge(0, 15)}>下 ↓</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.nudge(-15, 0)}>← 左</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.nudge(15, 0)}>右 →</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.nudge(0, -15)}>↑ 上</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.nudge(0, 15)}>下 ↓</button>
           </div>
           <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.scale(0.92, 1)}>缩窄</button>
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.scale(1.08, 1)}>加宽</button>
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.scale(1, 0.92)}>变矮</button>
-            <button className="btn !px-1 !text-[10px]" onClick={() => editor.scale(1, 1.08)}>变高</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.scale(0.92, 1)}>缩窄</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.scale(1.08, 1)}>加宽</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.scale(1, 0.92)}>变矮</button>
+            <button className="btn !px-1 !py-2 !text-[11px]" onClick={() => editor.scale(1, 1.08)}>变高</button>
           </div>
           <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <button data-testid="add-vertex" className="btn !text-[10px]" onClick={editor.addVertex}>＋ 添加转角</button>
-            <button className="btn !text-[10px]" onClick={editor.duplicate}>复制房间</button>
+            <button data-testid="add-vertex" className="btn !py-2 !text-[11px]" onClick={editor.addVertex}>＋ 添加转角</button>
+            <button className="btn !py-2 !text-[11px]" onClick={editor.duplicate}>复制房间</button>
           </div>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {room.polygon.map((_, vi) => (
-              <button
-                key={vi}
-                className="btn !px-2 !py-1 !text-[10px]"
-                disabled={room.polygon.length <= 3}
-                onClick={() => editor.removeVertex(vi)}
-              >
-                删点{vi + 1}
-              </button>
-            ))}
+          <div className="mt-2 rounded-lg bg-[#eef6f2] px-2.5 py-2 text-[11px] leading-relaxed text-[#60746c]">
+            拖动绿色顶点改形状；<b>双击顶点可删除</b>（至少保留 3 个）。
           </div>
-          <div className="mt-2 text-[10px] text-muted">
+          <div className="mt-2 text-[11px] text-muted">
             {geomText(room)}
           </div>
         </div>

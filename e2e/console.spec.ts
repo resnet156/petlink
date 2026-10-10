@@ -33,6 +33,7 @@ test('全流程点击无 console error / pageerror', async ({ page }) => {
   await page.getByTestId('pet-avatar').click({ force: true })
   await page.waitForTimeout(150)
   await page.mouse.click(5, 5)
+  await page.getByTestId('demo-mode-toggle').click() // 开启演示模式以显示模拟按钮
   await page.getByTestId('sim-next-room').click()
   await page.waitForTimeout(1800)
 

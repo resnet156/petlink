@@ -28,14 +28,12 @@ export function SuggestionCard() {
   return (
     <div
       data-testid="suggestion-card"
-      className="animate-pop absolute left-10 top-10 z-[8] w-[330px] rounded-[20px] border border-[#dce6e1] bg-white/95 p-4 shadow-softsm"
+      className="animate-pop absolute left-4 right-4 top-4 z-[8] flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-[#f1dcc4] bg-orange-soft/95 px-4 py-3 shadow-softsm backdrop-blur"
     >
-      <div className="text-sm font-extrabold">{room.name}所在环境需要关注</div>
-      <div className="my-2 text-xs leading-relaxed text-muted">
-        {room.name} {env.temperature.toFixed(1)}℃ · 湿度 {env.humidity}%
-        <br />
-        毛球已在此停留，建议将空调设置为 26℃ 保持舒适。
-        {!hasAC && <span className="text-orange"> （该房间无空调，将调用最近房间空调）</span>}
+      <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-orange" />
+      <div className="min-w-0 flex-1 text-xs leading-relaxed text-[#8b623f]">
+        <b>{room.name}环境需要关注</b> · {env.temperature.toFixed(1)}℃ / 湿度 {env.humidity}%，建议空调设为 26℃
+        {!hasAC && <span className="text-orange">（该房间无空调，将调用最近房间）</span>}
       </div>
       <div className="flex gap-2">
         <button
@@ -54,7 +52,7 @@ export function SuggestionCard() {
             setDismissed(sig)
           }}
         >
-          稍后提醒
+          稍后
         </button>
       </div>
     </div>
