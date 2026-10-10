@@ -1,7 +1,7 @@
 {
   "name": "petlink-web",
   "private": true,
-  "version": "0.2.0-collar.1",
+  "version": "0.2.1-collar.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -65,7 +65,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "barneyyyy99",
+        "owner": "resnet156",
         "repo": "petlink",
         "releaseType": "release"
       }

@@ -3,6 +3,7 @@ import { Activity, ArrowDownToLine, Box, Check, ChevronRight, CircleHelp, Eye, H
 import { get, set, del } from 'idb-keyval'
 import { PetScene } from '@/components/collar/PetScene'
 import { ReconstructionPanel } from '@/components/collar/ReconstructionPanel'
+import { WifiSetup } from '@/components/collar/WifiSetup'
 import { activityDescriptions, activityLabels, STALE_MS, validRoom, validateGlb, type MotionEvent, type RoomDimensions } from '@/domain/collar'
 import { matchingClip } from '@/domain/petMotion'
 import { artifactUrl, parseJobs } from '@/domain/reconstruction'
@@ -221,6 +222,7 @@ export function CollarPage() {
         {phase === 'connected' && !fresh && <div className="collar-message"><WifiOff size={15} />云端已连接，等待板子上传新数据。模型已停止动作。</div>}
         <dl className="collar-device-details"><div><dt>设备</dt><dd title={live?.device?.deviceId}>{live?.device?.deviceId || '—'}</dd></div><div><dt>连接方式</dt><dd>{sourceLabel}</dd></div><div><dt>固件版本</dt><dd>{live?.device?.firmware || '—'}</dd></div><div><dt>最新窗口</dt><dd>{latest ? `#${latest.seq} · ${age}s 前` : '—'}</dd></div><div><dt>采样率</dt><dd>{live?.device?.sampleRate ? `${live.device.sampleRate} Hz` : '—'}</dd></div></dl>
         <div className="collar-privacy"><LockKeyhole size={12} />令牌只保存在当前浏览器会话，不会写入链接。</div>
+        <WifiSetup />
       </aside>
     </div>
 

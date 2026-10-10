@@ -20,6 +20,16 @@
 
 视频从前12秒每秒抽帧并选择清晰的一帧，因此本版未融合视频多视角。室内多图均保存，当前默认深度引擎使用首图，其余为参考；结果明确显示此限制。单张可见表面具有相对深度，不能冒充完整、可测量户型。
 
+## Web 设备配网
+
+0.2.1 新增网页配网入口，适用于已经配置云端身份的本板。通过 USB 数据线连接电脑，在支持 Web Serial 的桌面浏览器（推荐 Chrome/Edge）打开 HTTPS 页面，点击「设备配网」并由用户在浏览器设备选择框选择 M5Capsule。页面先读取固件能力，再填写 2.4GHz Wi-Fi 名称与密码；设备只修改自己的 Wi-Fi 配置，保留云端地址、设备 ID 和上传令牌。
+
+密码只用于当前页面到已选择 USB 设备的通信，不写入浏览器存储或上传云端。固件保存到独立 NVS 命名空间后重启；「配置已保存」不等于「联网成功」，页面根据设备 STATUS 显示实际连接情况。USB 重启重新枚举后如果浏览器需要选择设备，请再次选择原板；错误网络可以通过同一入口重配。
+
+Codex 内置浏览器或其他浏览器若没有 Web Serial 支持，页面提供复制链接和使用桌面浏览器的提示。首次 USB 访问由浏览器要求用户选择授权，不能通过网页静默授予。这个入口负责 Wi-Fi 更新，不是恢复出厂或固件刷写；新设备的首次云端身份配置仍使用固件仓库的私有配置脚本。
+
+配网流程复用 [Chrome 官方 Web Serial API](https://developer.chrome.com/docs/capabilities/serial)，按用户操作打开端口，并在断开时释放读写锁。浏览器能力由 feature detection 判断。
+
 ## 项目布局
 
 - `src/components/collar/`、`src/pages/CollarPage.tsx`：真实 3D 与交互。
@@ -118,6 +128,6 @@ PETLINK_WORKER_DATA=<private-directory>/model-worker
 PETLINK_MODEL_CAPABILITIES=pet,room
 ```
 
-部署机使用 `~/Library/LaunchAgents/com.petlink.model-worker.plist`；令牌放工作区私有 env，plist 只指向启动脚本。停止：`launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.petlink.model-worker.plist`；启动：`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.petlink.model-worker.plist`。节点离线时任务保留 queued；运行任务失联超过3分钟，下一次节点领取时转 failed，可在网页重试。服务器支持同一家庭，尚未实现多租户用户系统。
+本地 Mac 使用 `~/Library/LaunchAgents/com.petlink.model-worker.plist`；令牌放工作区私有 env，plist 只指向启动脚本。停止：`launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.petlink.model-worker.plist`；启动：`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.petlink.model-worker.plist`。节点离线时任务保留 queued；运行任务失联超过3分钟，下一次节点领取时转 failed，可在网页重试。服务器支持同一家庭，尚未实现多租户用户系统。
 
 室内完整2D/3D结构仍需要可靠的多视角配准、相机/尺度校准与结构提取。当前真实相对深度、人工尺寸平面图各自标注来源，不能用于测量或导航。宠物专属骨骼绑定及实宠动作分类数据集训练仍是后续项。
