@@ -32,7 +32,7 @@ import { camerasOf, roomHasDevice } from '@/lib/tracking'
 import { mockHardwareAdapter } from '@/adapters/mock'
 import { timeHM } from '@/lib/time'
 
-export type PageKey = 'home' | 'map' | 'records' | 'me'
+export type PageKey = 'collar' | 'home' | 'map' | 'records' | 'me'
 export type MapMode = 'live' | 'history' | 'devices'
 export type ModalKey =
   | 'mapBuilder'
@@ -247,7 +247,7 @@ export const useStore = create<StoreState>()(
       schemaVersion: SCHEMA_VERSION,
       ...freshDomain(),
 
-      page: 'home',
+      page: 'collar',
       widgetMode: typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mini') === '1',
       mapMode: 'live',
       modal: null,

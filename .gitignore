@@ -13,3 +13,11 @@ test-results
 .env
 .env.*
 !.env.example
+
+# Hardware MVP private state
+.private/
+.venv/
+__pycache__/
+.pytest_cache/
+*.sqlite3*
+.playwright-cli/

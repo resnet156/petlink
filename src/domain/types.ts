@@ -88,6 +88,9 @@ export type HomeMap = {
 
 export type PetBehavior =
   | 'idle'
+  | 'walking'
+  | 'shaking'
+  | 'unknown'
   | 'looking'
   | 'running'
   | 'sleeping'

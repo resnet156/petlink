@@ -1,5 +1,19 @@
 # PetLink × 小度 · 全屋宠物陪伴 Web App
 
+## 真实项圈 MVP（2026-10-10）
+
+本分支新增 M5Capsule 六轴采集 → HTTPS 鉴权上传 → SQLite 持久化 → 规则运动识别 → Three.js 3D 宠物联动。
+默认入口是「真实项圈」。原有首页、地图和生活记录保留为产品演示；真实六轴数据不提供室内定位、电量、进食、睡眠或情绪结论。
+
+- [运行、协议、部署和回滚](docs/HARDWARE_MVP.md)
+- [开源方案调研与推理条件](docs/opensource-research.md)
+- [固件与设备网关](https://github.com/resnet156/petlink-firmware)（独立私有仓库）
+
+四类照片/视频入口已接入真实云任务：宠物使用开源 TripoSR 生成带纹理 GLB；室内使用 Depth Anything V2 Small 生成可见表面的相对深度网格。推理在 Mac MPS 节点运行，项圈通过 Wi-Fi 独立联网。网页复用 Three.js 官方环境光照、接触阴影与镜头控制。
+完整准确户型、视频多视图融合和宠物专属骨骼尚未完成；人工尺寸 2D/3D 房间保留辅助入口。详细范围和使用方法见上方运行文档。
+
+以下内容保留上游产品原型的说明和历史验收，仅适用于对应演示功能，不代表新增硬件功能已经完成相同验收。
+
 > PetLink 是一个面向人宠分离场景的全屋宠物陪伴 Web 应用。它以家庭地图中的实时宠物 Avatar 为核心，将多摄像头、项圈定位、环境传感器与小度智能设备统一到同一空间模型中，让用户随时知道宠物在哪里、在做什么，并可一键看它、叫它、陪它、投喂或调动所在房间设备；宠物跨房间时持续追踪并完成摄像头接力，全天活动则自动沉淀为宠物踪迹与 AI 宠物日记。
 
 本项目基于交互原型 `petlink_pet_companion_prototype_v4.html`（仅作视觉 / 信息架构 / 交互意图参考）重新实现为组件化、可部署、可迭代的 Web App。**所有模块共享同一份 `HomeMap / Device / PetState / PetEvent` 状态与数据模型**，绝非把单文件 HTML 塞进 React。
@@ -158,4 +172,3 @@ src/
 浏览器 Console 校验：全流程点击 **0 个未处理 runtime error / 0 pageerror**（`e2e/console.spec.ts` 守卫）。
 
 测试结果：单元 19/19 通过；E2E 10/10 通过；`npm run build` 通过。
-

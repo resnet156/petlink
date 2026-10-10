@@ -7,7 +7,7 @@ const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || 'https:
 const anonKey =
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || 'sb_publishable_nsZg8-zmmUV9aO8XeFUFoA_kzOxmYIO'
 
-export const isCloudEnabled = Boolean(url && anonKey)
+export const isCloudEnabled = import.meta.env.VITE_DISABLE_SUPABASE !== 'true' && Boolean(url && anonKey)
 
 export const supabase: SupabaseClient | null = isCloudEnabled
   ? createClient(url, anonKey, {

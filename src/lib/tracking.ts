@@ -51,6 +51,9 @@ export function trackingSourceLabel(sources: string[]): string {
 }
 
 export const behaviorLabel: Record<string, string> = {
+  walking: '步行样活动',
+  shaking: '抖动',
+  unknown: '暂无动作数据',
   idle: '静止',
   looking: '摇头 / 张望',
   running: '奔跑',
@@ -62,6 +65,9 @@ export const behaviorLabel: Record<string, string> = {
 }
 
 export const behaviorMeta: Record<string, string> = {
+  walking: '项圈运动阈值分类 · 待宠物实测校准',
+  shaking: '项圈检测到快速转动',
+  unknown: '等待新鲜项圈遥测',
   sleeping: '姿态稳定 · 正在休息',
   idle: '当前位置稳定',
   looking: '正在观察周围',
@@ -74,6 +80,9 @@ export const behaviorMeta: Record<string, string> = {
 
 /** 行为对应的状态色（用于头像状态环/徽标） */
 export const behaviorColor: Record<string, string> = {
+  walking: '#419d88',
+  shaking: '#d38738',
+  unknown: '#8b9591',
   sleeping: '#7f93c0',
   idle: '#9aa8a3',
   looking: '#4ca092',
@@ -86,6 +95,9 @@ export const behaviorColor: Record<string, string> = {
 
 /** 行为对应的小图标（emoji），用于头像右上角悬浮状态徽标 */
 export const behaviorBadge: Record<string, string> = {
+  walking: '🐾',
+  shaking: '↔',
+  unknown: '—',
   sleeping: '💤',
   idle: '●',
   looking: '👀',

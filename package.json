@@ -1,7 +1,7 @@
 {
   "name": "petlink-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0-collar.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -24,6 +24,7 @@
     "lucide-react": "^0.447.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "three": "0.180.0",
     "web-push": "^3.6.7",
     "zustand": "4.5.5"
   },
@@ -32,6 +33,7 @@
     "@types/node": "^22.20.4",
     "@types/react": "18.3.11",
     "@types/react-dom": "18.3.0",
+    "@types/three": "0.180.0",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "4.3.2",
     "autoprefixer": "10.4.20",

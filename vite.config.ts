@@ -5,9 +5,10 @@ import { fileURLToPath, URL } from 'node:url'
 
 // Electron 桌面组件构建：资源用相对路径（file:// 加载）
 const isElectron = process.env.VITE_ELECTRON === '1'
+const basePath = process.env.VITE_BASE_PATH || '/'
 
 export default defineConfig({
-  base: isElectron ? './' : '/',
+  base: isElectron ? './' : basePath,
   plugins: [
     react(),
     VitePWA({
@@ -24,13 +25,13 @@ export default defineConfig({
         background_color: '#eef3ef',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
-        scope: '/',
+        start_url: basePath,
+        scope: basePath,
         lang: 'zh-CN',
         icons: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: `${basePath}icon-192.png`, sizes: '192x192', type: 'image/png' },
+          { src: `${basePath}icon-512.png`, sizes: '512x512', type: 'image/png' },
+          { src: `${basePath}icon-maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       injectManifest: {
