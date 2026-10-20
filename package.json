@@ -1,12 +1,13 @@
 {
   "name": "petlink-web",
   "private": true,
-  "version": "0.1.18-collar.0",
+  "version": "0.1.18-collar.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:petlink": "VITE_BASE_PATH=/petlink/ VITE_DISABLE_SUPABASE=true npm run build",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
     "test:watch": "vitest",

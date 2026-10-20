@@ -43,6 +43,7 @@ npm run dev          # 开发服务器 http://localhost:5173（演示控制台�
 ```bash
 npm run build        # tsc 类型检查 + vite 生产构建，产物在 dist/
 npm run preview      # 本地预览生产构建
+npm run build:petlink # 部署到 /petlink/ 时使用，资源和 PWA 限定在该路径
 ```
 
 ## 测试

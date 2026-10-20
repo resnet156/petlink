@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .classifier import ALGORITHM, classify
 from .jobs import create_jobs_router
 
-VERSION = "0.1.18-collar.0"
+VERSION = "0.1.18-collar.1"
 
 
 class Sample(BaseModel):
