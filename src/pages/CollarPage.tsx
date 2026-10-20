@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, ArrowDownToLine, Box, Check, ChevronRight, CircleHelp, Eye, House, Link2, LockKeyhole, Radio, RotateCcw, Upload, WifiOff } from 'lucide-react'
+import { Activity, ArrowDownToLine, Box, Check, ChevronRight, CircleHelp, Eye, House, Link2, LockKeyhole, Play, Radio, RotateCcw, Upload, WifiOff } from 'lucide-react'
 import { get, set, del } from 'idb-keyval'
-import { PetScene } from '@/components/collar/PetScene'
+import { PetScene, type PetModelInfo } from '@/components/collar/PetScene'
 import { ReconstructionPanel } from '@/components/collar/ReconstructionPanel'
 import { WifiSetup } from '@/components/collar/WifiSetup'
-import { activityDescriptions, activityLabels, STALE_MS, validRoom, validateGlb, type MotionEvent, type RoomDimensions } from '@/domain/collar'
+import { activityDescriptions, activityLabels, STALE_MS, validRoom, validateGlb, type CollarActivity, type MotionEvent, type RoomDimensions } from '@/domain/collar'
 import { matchingClip } from '@/domain/petMotion'
 import { artifactUrl, parseJobs } from '@/domain/reconstruction'
 import { apiUrl, useCollar } from '@/store/useCollar'
@@ -66,29 +66,45 @@ export function CollarPage() {
   const [roomConfirmed, setRoomConfirmed] = useState(false)
   const [roomMessage, setRoomMessage] = useState('')
   const [avatar, setAvatar] = useState(() => localRead(AVATAR_KEY, { photo: '', color: '#c39459' }))
+  const [avatarStyle, setAvatarStyle] = useState<'chibi' | 'reconstructed'>('chibi')
+  const [chibiModel, setChibiModel] = useState<ArrayBuffer | null>(null)
+  const [chibiError, setChibiError] = useState('')
+  const [previewMotion, setPreviewMotion] = useState<Exclude<CollarActivity, 'unknown'> | null>(null)
   const [model, setModel] = useState<ArrayBuffer | null>(null)
   const [modelName, setModelName] = useState('')
   const [modelMethod, setModelMethod] = useState('')
   const [modelLimitations, setModelLimitations] = useState<string[]>([])
-  const [modelInfo, setModelInfo] = useState<{ clips: string[]; error: string; loaded?: boolean }>({ clips: [], error: '' })
+  const [modelInfo, setModelInfo] = useState<PetModelInfo>({ clips: [], error: '' })
   const [avatarMessage, setAvatarMessage] = useState('')
   const [uploading, setUploading] = useState(false)
   const [modelCacheReady, setModelCacheReady] = useState(false)
   const [autoModelStatus, setAutoModelStatus] = useState('')
   const modelChosen = useRef(false)
   const pendingModel = useRef<{ name: string; data: ArrayBuffer; method?: string; limitations?: string[] } | null>(null)
-  const modelInfoCallback = useCallback((info: typeof modelInfo) => {
+  const modelInfoCallback = useCallback((info: PetModelInfo) => {
     setModelInfo(info)
-    if (info.error) { pendingModel.current = null; setUploading(false) }
-    if (info.loaded && pendingModel.current) {
+    if (avatarStyle === 'reconstructed' && info.error) { pendingModel.current = null; setUploading(false) }
+    if (avatarStyle === 'reconstructed' && info.loaded && pendingModel.current) {
       const pending = pendingModel.current
       pendingModel.current = null
       void set(MODEL_KEY, pending).then(() => {
         setAvatarMessage('模型已保存。优先使用内置动作；无匹配动画时仅对整体模型做动作反馈，离线冻结。')
       }).catch(() => setAvatarMessage('模型可预览，但浏览器无法保存；重新打开后需要再次导入。')).finally(() => setUploading(false))
     }
-  }, [])
+  }, [avatarStyle])
   const modelLoadGeneration = useRef(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const path = `${import.meta.env.BASE_URL}models/quaternius-shiba-chibi.glb`
+    void fetch(path, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error('Q 版模型暂时无法载入')
+      const data = await response.arrayBuffer()
+      validateGlb(data)
+      setChibiModel(data)
+    }).catch((error) => { if (!controller.signal.aborted) setChibiError(error instanceof Error ? error.message : 'Q 版模型暂时无法载入') })
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -129,6 +145,8 @@ export function CollarPage() {
   }
   const loadModel = async (file?: File) => {
     if (!file) return
+    setAvatarStyle('reconstructed')
+    setPreviewMotion(null)
     modelChosen.current = true
     modelLoadGeneration.current += 1
     setUploading(true)
@@ -147,14 +165,16 @@ export function CollarPage() {
   }
   const removeModel = async () => {
     modelChosen.current = true
-    try { await del(MODEL_KEY); modelLoadGeneration.current += 1; pendingModel.current = null; setModel(null); setModelName(''); setModelMethod(''); setModelLimitations([]); setUploading(false); setAvatarMessage('已恢复模板形象。') }
+    try { await del(MODEL_KEY); modelLoadGeneration.current += 1; pendingModel.current = null; setModel(null); setModelName(''); setModelMethod(''); setModelLimitations([]); setUploading(false); setAvatarStyle('chibi'); setAvatarMessage('已恢复 Q 版骨骼角色。') }
     catch { setAvatarMessage('无法清除已保存的模型，请重试。') }
   }
-  const applyGeneratedPet = useCallback((data: ArrayBuffer, name: string, method: string, limitations: string[]) => {
+  const applyGeneratedPet = useCallback((data: ArrayBuffer, name: string, method: string, limitations: string[], background = false) => {
     modelLoadGeneration.current += 1
-    pendingModel.current = { data, name, method, limitations }
-    setUploading(true); setModel(data); setModelName(name); setModelMethod(method); setModelLimitations(limitations)
-    setAvatarMessage('正在解析服务端生成的真实 GLB 模型…')
+    const record = { data, name, method, limitations }
+    pendingModel.current = background ? null : record
+    setUploading(!background); setModel(data); setModelName(name); setModelMethod(method); setModelLimitations(limitations)
+    if (background) void set(MODEL_KEY, record).catch(() => {})
+    else setAvatarMessage('正在解析服务端生成的真实 GLB 模型…')
   }, [])
 
   useEffect(() => {
@@ -180,7 +200,7 @@ export function CollarPage() {
           const data = await artifact.arrayBuffer()
           validateGlb(data)
           if (!disposed && !modelChosen.current && generation === modelLoadGeneration.current) {
-            applyGeneratedPet(data, `pet-${latestModel.id.slice(0, 8)}.glb`, latestModel.result.method, latestModel.result.limitations)
+            applyGeneratedPet(data, `pet-${latestModel.id.slice(0, 8)}.glb`, latestModel.result.method, latestModel.result.limitations, true)
             return
           }
         }
@@ -193,6 +213,9 @@ export function CollarPage() {
   }, [token, modelCacheReady, model, applyGeneratedPet])
 
   const hasMatchingAnimation = !!matchingClip(modelInfo.clips.map((name) => ({ name })), activity)
+  const sceneModel = avatarStyle === 'chibi' ? chibiModel : model
+  const sceneActivity = avatarStyle === 'chibi' && previewMotion ? previewMotion : activity
+  const chibiReady = avatarStyle === 'chibi' && !!chibiModel && modelInfo.loaded && modelInfo.rigged
 
   return <div className="collar-page" data-testid="collar-page">
     <header className="collar-page-heading">
@@ -202,11 +225,12 @@ export function CollarPage() {
 
     <div className="collar-top-grid">
       <section className="collar-stage-card" aria-label="真实动作与 3D 宠物">
-        <div className="collar-stage-heading"><div><span className="collar-small-label">YOUR LITTLE COMPANION</span><h2>{pet.name}<span>的数字伙伴</span></h2></div><span className="collar-model-tag"><Box size={13} />{model && modelInfo.loaded ? modelMethod ? '真实重建 GLB' : '导入 GLB' : '程序模板'}</span></div>
-        <PetScene activity={activity} color={avatar.color} room={roomState.dimensions} model={model} viewAzimuth={/triposr/i.test(modelMethod) ? 2.16 : undefined} onModelInfo={modelInfoCallback} />
-        <div className="collar-stage-hint" role="status">{autoModelStatus || '拖动旋转 · 滚轮 / 双指缩放'}</div>
+        <div className="collar-stage-heading"><div><span className="collar-small-label">YOUR LITTLE COMPANION</span><h2>{pet.name}<span>的数字伙伴</span></h2></div><span className="collar-model-tag"><Box size={13} />{chibiReady ? `Q 版骨骼 · ${modelInfo.boneCount} 骨` : avatarStyle === 'chibi' ? 'Q 版动画角色' : model && modelInfo.loaded ? modelMethod ? '照片重建 GLB' : '导入 GLB' : '程序模板'}</span></div>
+        <PetScene activity={sceneActivity} color={avatar.color} room={roomState.dimensions} model={sceneModel} headScale={avatarStyle === 'chibi' ? 1.22 : 1} viewAzimuth={avatarStyle === 'reconstructed' && /triposr/i.test(modelMethod) ? 2.16 : undefined} clipMap={avatarStyle === 'chibi' ? { rest: 'Idle', walk: 'Walk', run: 'Gallop', shake: '' } : undefined} onModelInfo={modelInfoCallback} />
+        <div className="collar-stage-hint" role="status">{avatarStyle === 'reconstructed' && autoModelStatus ? autoModelStatus : '拖动旋转 · 滚轮 / 双指缩放'}</div>
+        <div className="collar-character-controls"><div className="collar-character-switch" role="group" aria-label="宠物 3D 形象"><button type="button" className={avatarStyle === 'chibi' ? 'is-active' : ''} onClick={() => { setAvatarStyle('chibi'); setPreviewMotion(null) }}>Q 版 · 骨骼动画</button><button type="button" className={avatarStyle === 'reconstructed' ? 'is-active' : ''} disabled={!model} onClick={() => { setAvatarStyle('reconstructed'); setPreviewMotion(null) }}>照片重建 · 真实外观</button></div>{avatarStyle === 'chibi' && <div className="collar-preview-switch" role="group" aria-label="骨骼动画预览"><span><Play size={12} />动画预览</span>{([{ key: 'rest', label: '待机' }, { key: 'walk', label: '行走' }, { key: 'run', label: '奔跑' }] as const).map(({ key, label }) => <button type="button" key={key} className={previewMotion === key ? 'is-active' : ''} aria-pressed={previewMotion === key} onClick={() => setPreviewMotion(key)}>{label}</button>)}<button type="button" className={!previewMotion ? 'is-active' : ''} aria-pressed={!previewMotion} onClick={() => setPreviewMotion(null)}>跟随项圈</button></div>}</div>
         <div className="collar-stage-footer"><div className={`collar-activity-icon ${fresh ? 'is-live' : ''}`}><Activity size={25} /></div><div><h3 data-testid="collar-activity">{activityLabels[activity]}</h3><p>{activityDescriptions[activity]}</p></div><div className="collar-confidence"><b>{fresh && latest ? `${Math.round(latest.confidence * 100)}%` : '—'}</b><span>规则分类置信度</span></div></div>
-        <div className="collar-stage-note"><CircleHelp size={13} /><span>{model && modelInfo.loaded ? `${modelMethod || '导入模型'} · ${activity === 'unknown' ? '离线冻结。' : hasMatchingAnimation ? '正在播放模型内置动作。' : '整体模型动作反馈，无骨骼步态。'}项圈不提供室内位置。` : roomState.dimensions ? '房间为手动确认结构；宠物在房间中的位置仅为展示。' : '待真实模型载入，当前为程序模板。项圈只提供动作，不提供室内位置。'}</span></div>
+        <div className="collar-stage-note"><CircleHelp size={13} /><span>{avatarStyle === 'chibi' ? chibiError ? `${chibiError}，显示临时形象。` : previewMotion ? `正在手动预览 ${activityLabels[previewMotion]} 骨骼动作；此动画不代表项圈实时数据。` : activity === 'unknown' ? '项圈离线，角色冻结；点击动画预览可试播骨骼动作。' : `项圈驱动 ${activityLabels[activity]}。待机、行走、奔跑使用模型骨骼动画；抖动为整体反馈。` : model && modelInfo.loaded ? `${modelMethod || '导入模型'} · ${activity === 'unknown' ? '离线冻结。' : hasMatchingAnimation ? '正在播放模型内置动作。' : '整体模型动作反馈，无骨骼步态。'}项圈不提供室内位置。` : roomState.dimensions ? '房间为手动确认结构；宠物在房间中的位置仅为展示。' : '待模型载入，当前为程序模板。项圈只提供动作，不提供室内位置。'}</span></div>
       </section>
 
       <aside className="collar-connect-card">
@@ -262,16 +286,17 @@ export function CollarPage() {
       </div>}
 
       {tab === 'avatar' && <div className="collar-tab-panel" id="collar-panel-avatar" role="tabpanel" aria-labelledby="collar-tab-avatar">
-        <ReconstructionPanel kind="pet" token={token} onApplyPet={applyGeneratedPet} />
-        {modelMethod && <div className="collar-capability-note"><Box size={20} /><div><b>当前真实模型 · {modelMethod}</b>{modelLimitations.length > 0 && <ul className="reconstruction-limitations">{modelLimitations.map((item, index) => <li key={index}>{item}</li>)}</ul>}<p>{modelInfo.clips.length ? `模型包含 ${modelInfo.clips.length} 段动画。` : '这是实际生成的静态网格；动作以整体起伏或转向反馈，并非骨骼步态。未观测到的背面与腿部由模型估计。'}</p></div></div>}
+        <ReconstructionPanel kind="pet" token={token} onApplyPet={(data, name, method, limitations) => { setAvatarStyle('reconstructed'); setPreviewMotion(null); applyGeneratedPet(data, name, method, limitations) }} />
+        <div className="collar-capability-note"><Box size={20} /><div><b>Q 版骨骼形象与照片重建</b><p>默认 Q 版柴犬基于 Quaternius 的 CC0 骨骼角色，按照你提供的橙白柴犬照片调整风格，不是从照片自动生成的专属骨骼。上传照片或视频生成的模型保留实际外观，但当前重建结果没有骨骼；可在上方切换查看。</p></div></div>
+        {modelMethod && <div className="collar-capability-note"><Box size={20} /><div><b>{avatarStyle === 'reconstructed' ? '当前照片重建模型' : '已保存的照片重建模型'} · {modelMethod}</b>{modelLimitations.length > 0 && <ul className="reconstruction-limitations">{modelLimitations.map((item, index) => <li key={index}>{item}</li>)}</ul>}<p>{avatarStyle === 'reconstructed' && modelInfo.clips.length ? `模型包含 ${modelInfo.clips.length} 段动画。` : '这是实际生成的静态网格；动作以整体起伏或转向反馈，并非骨骼步态。未观测到的背面与腿部由模型估计。'}</p></div></div>}
         <details className="collar-local-tools"><summary>本地照片参考、模板颜色与已有 GLB 导入</summary>
         <div className="collar-section-heading"><div><h3>让数字伙伴，更像它一点。</h3><p>先保存照片作为外观参考；已有精细模型可直接导入 GLB。</p></div><span className="collar-neutral-tag">本地模型工作台</span></div>
-        <div className="collar-avatar-grid"><div><label className={`collar-photo-drop collar-pet-photo ${avatar.photo ? 'has-image' : ''}`}>{avatar.photo ? <img src={avatar.photo} alt="宠物外观参考照片" /> : <><Eye size={27} /><b>添加宠物照片</b><span>保存参考，不自动生成模型</span></>}<input type="file" accept="image/*" aria-label="上传宠物参考照片" onChange={(e) => { void handlePhoto(e.target.files?.[0], 'avatar'); e.target.value = '' }} />{avatar.photo && <span className="collar-photo-replace"><Upload size={13} />更换照片</span>}</label><div className="collar-color-picker"><label htmlFor="pet-fur-color">模板毛色</label><input id="pet-fur-color" type="color" disabled={!!model} value={avatar.color} onChange={(e) => { const next = { ...avatar, color: e.target.value }; setAvatar(next); try { localStorage.setItem(AVATAR_KEY, JSON.stringify(next)) } catch { setAvatarMessage('颜色预览已更新，但浏览器未能保存。') } }} /><span>{model ? '导入模型使用自带材质' : '手动选择 · 不是照片建模'}</span></div></div>
+        <div className="collar-avatar-grid"><div><label className={`collar-photo-drop collar-pet-photo ${avatar.photo ? 'has-image' : ''}`}>{avatar.photo ? <img src={avatar.photo} alt="宠物外观参考照片" /> : <><Eye size={27} /><b>添加宠物照片</b><span>保存参考，不自动生成模型</span></>}<input type="file" accept="image/*" aria-label="上传宠物参考照片" onChange={(e) => { void handlePhoto(e.target.files?.[0], 'avatar'); e.target.value = '' }} />{avatar.photo && <span className="collar-photo-replace"><Upload size={13} />更换照片</span>}</label><div className="collar-color-picker"><label htmlFor="pet-fur-color">模板毛色</label><input id="pet-fur-color" type="color" disabled={!!sceneModel} value={avatar.color} onChange={(e) => { const next = { ...avatar, color: e.target.value }; setAvatar(next); try { localStorage.setItem(AVATAR_KEY, JSON.stringify(next)) } catch { setAvatarMessage('颜色预览已更新，但浏览器未能保存。') } }} /><span>{sceneModel ? '当前模型使用自带材质' : '手动选择 · 不是照片建模'}</span></div></div>
         <div className="collar-model-import"><div className="collar-card-heading"><span><Box size={19} /> 导入精细 3D 模型</span><span className="collar-mono">GLB 2.0</span></div><p>导入已有的宠物模型。支持贴图内嵌的 GLB，保留模型网格、材质与骨骼动画。</p><label className={`collar-button is-primary collar-file-button ${uploading ? 'is-disabled' : ''}`}><Upload size={16} />{uploading ? '正在读取…' : '选择 GLB 模型'}<input type="file" accept=".glb,model/gltf-binary" disabled={uploading} aria-label="导入 GLB 宠物模型" onChange={(e) => { void loadModel(e.target.files?.[0]); e.target.value = '' }} /></label><small>最大 25 MB · 不支持 Draco 压缩 · 文件仅存本机浏览器</small>
-          {modelName && <div className="collar-model-file"><Box size={18} /><div><b>{modelName}</b><span>{modelInfo.error ? '导入未成功，仍显示模板' : modelInfo.loaded ? `${modelInfo.clips.length} 段内置动画` : '正在读取模型'}</span></div><button type="button" className="collar-button" disabled={uploading} onClick={() => void removeModel()}>移除</button></div>}
+          {modelName && <div className="collar-model-file"><Box size={18} /><div><b>{modelName}</b><span>{avatarStyle === 'chibi' ? '已保存 · 切换到照片重建可查看' : modelInfo.error ? '模型未能载入' : modelInfo.loaded ? `${modelInfo.clips.length} 段内置动画` : '正在读取模型'}</span></div><button type="button" className="collar-button" disabled={uploading} onClick={() => void removeModel()}>移除</button></div>}
           <div className="collar-animation-tags">{['Idle / Rest', 'Walk', 'Run', 'Shake'].map((name) => <span key={name}>{name}</span>)}</div>
           <p className="collar-footnote">优先匹配内置动作；缺少对应动画时仅整体起伏或转向，不伪造骨骼步态和位置。断线冻结当前姿态。</p>
-          {modelInfo.clips.length > 0 && <p className="collar-footnote">模型动画：{modelInfo.clips.join(' · ')}</p>}
+          {avatarStyle === 'reconstructed' && modelInfo.clips.length > 0 && <p className="collar-footnote">模型动画：{modelInfo.clips.join(' · ')}</p>}
           {(avatarMessage || modelInfo.error) && <div className={`collar-message ${modelInfo.error ? 'is-error' : ''}`} role="status">{modelInfo.error || avatarMessage}</div>}
         </div></div>
         <div className="collar-capability-note"><Box size={20} /><div><b>本地参考不会触发 AI 任务</b><p>此处照片只在浏览器保存。需要真实生成时，请使用上方的宠物照片或视频上传入口。</p></div></div>

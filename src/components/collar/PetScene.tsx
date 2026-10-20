@@ -4,8 +4,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import type { CollarActivity, RoomDimensions } from '@/domain/collar'
-import { matchingClip, wholeModelMotion } from '@/domain/petMotion'
+import type { PetClipMap } from '@/domain/petMotion'
+import { PetAnimationController, preparePetClips } from './petAnimation'
+import { deduplicatePetClips } from './petClipAssets'
 import { createContactShadow } from './contactShadow'
+
+export type PetModelInfo = { clips: string[]; error: string; loaded?: boolean; rigged?: boolean; boneCount?: number; skinnedMeshCount?: number }
 
 type Props = {
   activity: CollarActivity
@@ -13,11 +17,15 @@ type Props = {
   room: RoomDimensions | null
   model: ArrayBuffer | null
   viewAzimuth?: number
-  onModelInfo: (info: { clips: string[]; error: string; loaded?: boolean }) => void
+  clipMap?: PetClipMap
+  headScale?: number
+  onModelInfo: (info: PetModelInfo) => void
 }
 
 function disposeObject(root: THREE.Object3D) {
+  const skeletons = new Set<THREE.Skeleton>()
   root.traverse((object) => {
+    if (object instanceof THREE.SkinnedMesh) skeletons.add(object.skeleton)
     if (!(object instanceof THREE.Mesh)) return
     object.geometry.dispose()
     const materials = Array.isArray(object.material) ? object.material : [object.material]
@@ -26,6 +34,7 @@ function disposeObject(root: THREE.Object3D) {
       material.dispose()
     }
   })
+  for (const skeleton of skeletons) skeleton.dispose()
 }
 
 function buildPet(color: string) {
@@ -99,10 +108,12 @@ function buildPet(color: string) {
   return { root, torso, head, legs, tail }
 }
 
-export function PetScene({ activity, color, room, model, viewAzimuth, onModelInfo }: Props) {
+export function PetScene({ activity, color, room, model, viewAzimuth, clipMap, headScale = 1, onModelInfo }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const activityRef = useRef(activity)
   activityRef.current = activity
+  const clipMapRef = useRef(clipMap)
+  clipMapRef.current = clipMap
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -135,11 +146,11 @@ export function PetScene({ activity, color, room, model, viewAzimuth, onModelInf
     environment.dispose()
     pmrem.dispose()
     const camera = new THREE.PerspectiveCamera(35, 1, .1, 120)
-    const distance = room ? Math.max(room.width, room.depth, room.height) + 1 : 3.65
+    const distance = room ? Math.max(room.width, room.depth, room.height) + 1 : 2.7
     const azimuth = viewAzimuth ?? .58
     camera.position.set(Math.sin(azimuth) * distance * 1.55, distance * .54, Math.cos(azimuth) * distance * 1.55)
     const controls = new OrbitControls(camera, renderer.domElement)
-    controls.target.set(0, room ? .6 : .85, 0)
+    controls.target.set(0, room ? .6 : .55, 0)
     controls.enableDamping = true
     controls.enablePan = false
     controls.minDistance = 2.6
@@ -203,10 +214,8 @@ export function PetScene({ activity, color, room, model, viewAzimuth, onModelInf
     const contactShadow = room ? null : createContactShadow(renderer, scene)
     let shadowDirty = true
     let loaded: THREE.Group | null = null
-    let mixer: THREE.AnimationMixer | null = null
-    let clips: THREE.AnimationClip[] = []
-    let activeAction: THREE.AnimationAction | null = null
-    let previousActivity: CollarActivity | null = null
+    let animation: PetAnimationController | null = null
+    let animated = false
     onModelInfo({ clips: [], error: '' })
 
     if (model) {
@@ -215,24 +224,36 @@ export function PetScene({ activity, color, room, model, viewAzimuth, onModelInf
       const onLoadError = () => { if (alive) onModelInfo({ clips: [], error: '模型读取失败；请使用贴图内嵌、未经 Draco 压缩的 GLB 2.0' }) }
       try { new GLTFLoader(manager).parse(model, '', (gltf) => {
         if (!alive) { disposeObject(gltf.scene); return }
-        const box = new THREE.Box3().setFromObject(gltf.scene)
+        const clips = preparePetClips(gltf.scene, deduplicatePetClips(gltf.animations), headScale)
+        const normalized = new THREE.Group()
+        normalized.add(gltf.scene)
+        normalized.updateMatrixWorld(true)
+        const box = new THREE.Box3().setFromObject(normalized)
         const size = box.getSize(new THREE.Vector3())
         const span = Math.max(size.x, size.y, size.z)
         if (!Number.isFinite(span) || span <= 0) { disposeObject(gltf.scene); onModelInfo({ clips: [], error: '模型没有可显示的几何体' }); return }
-        gltf.scene.scale.multiplyScalar(2 / span)
-        box.setFromObject(gltf.scene)
+        // Keep normalization outside animated nodes: root translation/scale tracks
+        // must not overwrite the fitted size or move the model below the floor.
+        normalized.scale.setScalar(2 / span)
+        normalized.updateMatrixWorld(true)
+        box.setFromObject(normalized)
         const center = box.getCenter(new THREE.Vector3())
-        gltf.scene.position.add(new THREE.Vector3(-center.x, -box.min.y, -center.z))
+        normalized.position.set(-center.x, -box.min.y, -center.z)
         gltf.scene.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; object.layers.enable(1) } })
         loaded = new THREE.Group()
-        loaded.add(gltf.scene)
+        loaded.add(normalized)
         scene.add(loaded)
         pet.root.visible = false
         shadowDirty = true
-        mixer = new THREE.AnimationMixer(gltf.scene)
-        clips = gltf.animations
-        previousActivity = null
-        onModelInfo({ clips: clips.map((clip) => clip.name), error: '', loaded: true })
+        animation = new PetAnimationController(gltf.scene, loaded, clips)
+        const bones = new Set<THREE.Bone>()
+        let skinnedMeshCount = 0
+        gltf.scene.traverse((object) => {
+          if (object instanceof THREE.SkinnedMesh) { skinnedMeshCount++; object.skeleton.bones.forEach((bone) => bones.add(bone)) }
+        })
+        element.dataset.rigged = String(skinnedMeshCount > 0 && bones.size > 0)
+        element.dataset.boneCount = String(bones.size)
+        onModelInfo({ clips: animation.clips.map((clip) => clip.name), error: '', loaded: true, rigged: skinnedMeshCount > 0 && bones.size > 0, boneCount: bones.size, skinnedMeshCount })
       }, onLoadError) } catch { onLoadError() }
     }
 
@@ -255,26 +276,12 @@ export function PetScene({ activity, color, room, model, viewAzimuth, onModelInf
       const delta = Math.min(clock.getDelta(), .1)
       const current = activityRef.current
       if (current !== 'unknown') elapsed += delta
-      if (loaded && mixer) {
-        if (current !== 'unknown' && current !== previousActivity) {
-          activeAction?.stop()
-          const clip = matchingClip(clips, current)
-          activeAction = clip ? mixer.clipAction(clip).reset().play() : null
-          previousActivity = current
-          shadowDirty = true
-        }
-        if (current !== 'unknown') {
-          if (activeAction) {
-            loaded.position.y = 0
-            loaded.rotation.set(0, 0, 0)
-            mixer.update(delta)
-          } else {
-            const pose = wholeModelMotion(current, elapsed)!
-            loaded.position.y = pose.y
-            loaded.rotation.set(pose.pitch, pose.yaw, pose.roll)
-          }
-        }
-        element.dataset.motionMode = current === 'unknown' ? 'frozen' : activeAction ? 'source-clip' : 'whole-model'
+      if (loaded && animation) {
+        const motion = animation.update(current, delta, clipMapRef.current)
+        if (element.dataset.motionMode !== motion.mode || element.dataset.motionClip !== (motion.clip ?? '')) shadowDirty = true
+        element.dataset.motionMode = motion.mode
+        element.dataset.motionClip = motion.clip ?? ''
+        animated = current !== 'unknown' && (current !== 'rest' || motion.mode === 'source-clip')
       } else if (current !== 'unknown') {
         const pace = current === 'run' ? 14 : current === 'walk' ? 7 : 0
         const phase = elapsed * pace
@@ -285,9 +292,8 @@ export function PetScene({ activity, color, room, model, viewAzimuth, onModelInf
         pet.tail.rotation.z = current === 'shake' ? Math.sin(elapsed * 25 + 1) * .4 : 0
         pet.legs.forEach((leg, i) => { leg.rotation.x = pace ? Math.sin(phase + (i === 0 || i === 3 ? 0 : Math.PI)) * (current === 'run' ? .7 : .4) : 0 })
       }
-      if (!loaded) element.dataset.motionMode = current === 'unknown' ? 'frozen' : 'template'
+      if (!loaded) { element.dataset.motionMode = current === 'unknown' ? 'frozen' : 'template'; animated = current !== 'unknown' && current !== 'rest' }
       shadowElapsed += delta
-      const animated = current !== 'unknown' && (current !== 'rest' || !!activeAction)
       // Cache static shadows and cap moving contact shadows at 20 Hz on mobile/desktop.
       if (contactShadow && (shadowDirty || (animated && shadowElapsed > .05))) {
         contactShadow.update()
@@ -303,15 +309,17 @@ export function PetScene({ activity, color, room, model, viewAzimuth, onModelInf
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
-      mixer?.stopAllAction()
+      animation?.dispose()
       contactShadow?.dispose()
       environmentTarget.dispose()
       disposeObject(scene)
       scene.traverse((object) => { if (object instanceof THREE.LineSegments) { object.geometry.dispose(); (object.material as THREE.Material).dispose() } })
       renderer.dispose()
       renderer.domElement.remove()
+      delete element.dataset.motionMode; delete element.dataset.motionClip
+      delete element.dataset.rigged; delete element.dataset.boneCount
     }
-  }, [color, room, model, viewAzimuth, onModelInfo])
+  }, [color, room, model, viewAzimuth, headScale, onModelInfo])
 
   return <div className="collar-scene" ref={host}>{error && <div className="collar-scene-error" role="status">{error}</div>}</div>
 }
