@@ -90,6 +90,31 @@ export function inferRoomKind(name: string): Room['kind'] {
   return 'custom'
 }
 
+/** 房间“门口”坐标：最靠近户型中心、且足够长的墙边中点（宠物进出房间的通道点） */
+export function roomDoorPoint(room: Room): Point {
+  const poly = room.polygon
+  if (poly.length < 3) return roomCentroid(room)
+  const C = { x: MAP_W / 2, y: MAP_H / 2 }
+  let best: Point | null = null
+  let bd = Infinity
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % poly.length]
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 90) continue
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    const d = Math.hypot(m.x - C.x, m.y - C.y)
+    if (d < bd) { bd = d; best = m }
+  }
+  return best ?? roomCentroid(room)
+}
+
+/** 跨房间步行路径：出发房间质心 → 出发门口 → 目标门口 → 目标房间质心 */
+export function buildWalkPath(from: Room | undefined, to: Room): Point[] {
+  const dest = roomCentroid(to)
+  if (!from) return [dest]
+  return [roomCentroid(from), roomDoorPoint(from), roomDoorPoint(to), dest]
+}
+
 let idCounter = 0
 export function makeId(prefix = 'id'): string {
   idCounter += 1

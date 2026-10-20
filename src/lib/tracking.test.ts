@@ -26,9 +26,9 @@ describe('tracking helpers', () => {
   })
 
   it('trackingSourceLabel maps sources', () => {
-    expect(trackingSourceLabel(['camera', 'ble'])).toBe('视觉 + BLE')
-    expect(trackingSourceLabel(['ble', 'imu'])).toBe('BLE + IMU')
-    expect(trackingSourceLabel(['ble'])).toBe('BLE')
+    expect(trackingSourceLabel(['camera', 'ble'])).toBe('视觉 + 项圈')
+    expect(trackingSourceLabel(['ble', 'imu'])).toBe('项圈信号')
+    expect(trackingSourceLabel(['ble'])).toBe('项圈信号')
   })
 
   it('handoffMessage covers no_camera and completed', () => {

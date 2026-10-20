@@ -1,5 +1,20 @@
 # PetLink × 小度 · 全屋宠物陪伴 Web App
 
+## 团队主仓库融合与真实项圈 MVP（2026-10-20）
+
+本分支以团队主仓库 [barneyyyy99/petlink](https://github.com/barneyyyy99/petlink) 的 v0.1.17 为基线，保留原首页、四项导航、地图、生活记录、Supabase 同步、自动户型识别和透明桌面组件。「真实项圈」是从首页进入的独立能力页。新增 M5Capsule 六轴采集 → HTTPS 鉴权上传 → SQLite 持久化 → 规则运动识别 → Three.js 宠物动作联动；真实六轴数据不提供室内定位、电量、进食、睡眠或情绪结论。
+
+- [运行、协议、部署和回滚](docs/HARDWARE_MVP.md)
+- [开源方案调研与推理条件](docs/opensource-research.md)
+- [Q 版骨骼桌宠管线与验收现状](docs/AVATAR_PIPELINE.md)
+- [固件与设备网关](https://github.com/resnet156/petlink-firmware)（独立私有仓库）
+
+宠物和室内照片/视频入口已接入异步任务：旧宠物任务使用开源 TripoSR 生成静态带纹理 GLB；室内任务使用 Depth Anything V2 Small 生成可见表面的相对深度网格。上游还提供户型图自动识别。推理在 Mac MPS 节点运行，项圈通过 Wi-Fi 独立联网。网页复用 Three.js 官方环境光照、接触阴影与镜头控制。
+0.2.1 新增 Web USB 配网：在桌面 Chrome/Edge 的 HTTPS 页面选择开发板后更新 2.4GHz Wi-Fi，保留板子已有云端身份；不支持 Web Serial 的浏览器提供明确的替代操作提示。
+本分支给原首页和透明桌宠增加按宠物 ID 区分的 Q 版骨骼建模入口。只有通过骨架、蒙皮和 Idle/Walk 动画校验的任务结果才可替换原照片/GIF；建模节点未通过实机质量验收时明确显示未就绪。原有 Quaternius 柴犬仍仅供真实项圈页的动作演示，不能代表从照片自动生成的宠物。完整准确户型、视频多视图融合和宠物专属 Q 版骨骼仍需按上方验收文档验证。
+
+以下内容保留上游产品原型的说明和历史验收，仅适用于对应演示功能，不代表新增硬件功能已经完成相同验收。
+
 > PetLink 是一个面向人宠分离场景的全屋宠物陪伴 Web 应用。它以家庭地图中的实时宠物 Avatar 为核心，将多摄像头、项圈定位、环境传感器与小度智能设备统一到同一空间模型中，让用户随时知道宠物在哪里、在做什么，并可一键看它、叫它、陪它、投喂或调动所在房间设备；宠物跨房间时持续追踪并完成摄像头接力，全天活动则自动沉淀为宠物踪迹与 AI 宠物日记。
 
 本项目基于交互原型 `petlink_pet_companion_prototype_v4.html`（仅作视觉 / 信息架构 / 交互意图参考）重新实现为组件化、可部署、可迭代的 Web App。**所有模块共享同一份 `HomeMap / Device / PetState / PetEvent` 状态与数据模型**，绝非把单文件 HTML 塞进 React。
@@ -28,6 +43,7 @@ npm run dev          # 开发服务器 http://localhost:5173（演示控制台�
 ```bash
 npm run build        # tsc 类型检查 + vite 生产构建，产物在 dist/
 npm run preview      # 本地预览生产构建
+npm run build:petlink # 部署到 /petlink/ 时使用，资源和 PWA 限定在该路径
 ```
 
 ## 测试
@@ -158,4 +174,3 @@ src/
 浏览器 Console 校验：全流程点击 **0 个未处理 runtime error / 0 pageerror**（`e2e/console.spec.ts` 守卫）。
 
 测试结果：单元 19/19 通过；E2E 10/10 通过；`npm run build` 通过。
-

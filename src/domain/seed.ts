@@ -8,8 +8,9 @@ import type {
   Room,
 } from './types'
 import { makeId, rectPoints } from './geometry'
+import { defaultFurniture } from '@/components/map/furnitureLib'
 
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 7
 
 function room(
   id: string,
@@ -20,7 +21,7 @@ function room(
   temperature: number,
   humidity: number,
 ): Room {
-  return {
+  const r: Room = {
     id,
     name,
     kind,
@@ -28,6 +29,8 @@ function room(
     devices,
     environment: { temperature, humidity, updatedAt: Date.now() },
   }
+  r.furniture = defaultFurniture(r)
+  return r
 }
 
 // 固定 id，便于 seed 设备双向绑定
@@ -68,11 +71,12 @@ export function seedHomeMap(): HomeMap {
     name: '我的家',
     version: 1,
     rooms: [
-      room(R.living, '客厅', 'living', rectPoints(30, 24, 470, 311), ['dev_cam_living', 'dev_spk_living', 'dev_ac_living'], 26.4, 56),
-      room(R.bedroom, '卧室', 'bedroom', rectPoints(530, 24, 440, 234), ['dev_cam_bedroom', 'dev_screen_bedroom'], 25.6, 53),
-      room(R.study, '书房', 'study', rectPoints(30, 354, 300, 222), ['dev_cam_study'], 26.8, 55),
-      room(R.balcony, '阳台', 'balcony', rectPoints(350, 354, 250, 222), ['dev_cam_balcony'], 27.5, 60),
-      room(R.dining, '餐厅', 'dining', rectPoints(620, 276, 350, 300), ['dev_feeder_dining', 'dev_water_dining', 'dev_sensor_dining'], 26.9, 58),
+      // 紧贴成一套完整户型（共享墙，无缝隙）
+      room(R.dining, '餐厅', 'dining', rectPoints(40, 40, 260, 260), ['dev_feeder_dining', 'dev_water_dining', 'dev_sensor_dining'], 26.9, 58),
+      room(R.study, '书房', 'study', rectPoints(300, 40, 220, 260), ['dev_cam_study'], 26.8, 55),
+      room(R.bedroom, '卧室', 'bedroom', rectPoints(520, 40, 440, 280), ['dev_cam_bedroom', 'dev_screen_bedroom'], 25.6, 53),
+      room(R.living, '客厅', 'living', rectPoints(40, 300, 480, 260), ['dev_cam_living', 'dev_spk_living', 'dev_ac_living'], 26.4, 56),
+      room(R.balcony, '阳台', 'balcony', rectPoints(520, 320, 440, 240), ['dev_cam_balcony'], 27.5, 60),
     ],
   }
 }
@@ -87,6 +91,9 @@ export function seedPet(): PetState {
     lastUpdatedAt: Date.now(),
     trackingSources: ['camera', 'ble'],
     collarBattery: 85,
+    species: '橘猫',
+    furColor: '橘白',
+    collarColor: '青绿色',
   }
 }
 
@@ -103,6 +110,9 @@ export function seedPets(): PetState[] {
       lastUpdatedAt: Date.now(),
       trackingSources: ['ble', 'imu'],
       collarBattery: 78,
+      species: '英短',
+      furColor: '蓝灰',
+      collarColor: '奶黄色',
     },
   ]
 }
@@ -159,6 +169,7 @@ export function seedEvents(): PetEvent[] {
     type,
     title,
     detail,
+    petId: 'pet_maoqiu',
     ...extra,
   })
   return [
@@ -179,6 +190,20 @@ export function seedEvents(): PetEvent[] {
       roomId: 'room_living',
       source: ['camera'],
     }),
+    // 团子（第二只宠物）当日事件，用于演示多宠物各自的日记
+    ev(210, 'room_change', '客厅 → 卧室', '项圈 BLE 判断团子进入卧室', {
+      fromRoomId: 'room_living',
+      toRoomId: 'room_bedroom',
+      roomId: 'room_bedroom',
+      petId: 'pet_tuanzi',
+      source: ['ble'],
+    }),
+    ev(150, 'play', '玩耍', '卧室摄像头识别到团子追逐玩具 6 分钟', { roomId: 'room_bedroom', petId: 'pet_tuanzi', media: { type: 'video' } }),
+    ev(80, 'drink', '喝水', '饮水器检测到团子饮水 20 秒', { roomId: 'room_bedroom', petId: 'pet_tuanzi' }),
+    // 往期事件（用于演示“今天 / 近7天 / 本月”时间筛选产生不同结果）
+    ev(2 * 24 * 60, 'play', '玩耍', '2 天前客厅玩耍 9 分钟', { roomId: 'room_living', media: { type: 'video' } }),
+    ev(5 * 24 * 60, 'eat', '完成进食', '5 天前喂食器记录 16g', { roomId: 'room_dining', deviceId: 'dev_feeder_dining' }),
+    ev(20 * 24 * 60, 'room_change', '客厅 → 书房', '20 天前的跨房间记录', { fromRoomId: 'room_living', toRoomId: 'room_study', roomId: 'room_study', source: ['ble'] }),
   ]
 }
 

@@ -20,6 +20,44 @@ body {
   color: #20322f;
 }
 
+/* Electron 无边框窗口拖拽区域 */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+/* 可拖拽窗口内，所有交互控件强制可点击（否则 Electron 拖拽区域会吞掉点击/输入） */
+.app-drag button,
+.app-drag a,
+.app-drag input,
+.app-drag textarea,
+.app-drag select,
+.app-drag label {
+  -webkit-app-region: no-drag;
+}
+
+/* The transparent desktop-pet canvas fills its window without the collar stage's fixed height. */
+.mini-avatar-scene .collar-scene {
+  width: 100%;
+  height: 100%;
+}
+
+html.petlink-widget-mode,
+html.petlink-widget-mode body,
+html.petlink-widget-mode #root {
+  background: transparent !important;
+}
+
+/* 地图上可点击设备：轮廓白色线条闪烁提示 */
+@keyframes clickblink {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+.map-click-blink {
+  animation: clickblink 1.5s ease-in-out infinite;
+}
+
 @layer components {
   .card {
     @apply bg-white/95 border border-line rounded-3xl p-5 shadow-softsm;
@@ -40,7 +78,7 @@ body {
     @apply bg-transparent border border-line;
   }
   .badge {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 bg-teal-soft text-teal text-[10px] font-extrabold;
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 bg-teal-soft text-teal text-[11px] font-extrabold;
   }
   .badge-warn {
     @apply bg-orange-soft text-orange;
@@ -85,7 +123,7 @@ body {
 }
 
 .pet-run {
-  animation: runbob 0.35s infinite alternate;
+  animation: runbob 0.32s infinite alternate;
 }
 .pet-look {
   animation: lookbob 0.75s infinite alternate;
@@ -93,29 +131,57 @@ body {
 .pet-sleep {
   animation: breathe 1.6s infinite ease-in-out;
 }
+.pet-eat {
+  animation: nodbob 0.5s infinite ease-in-out;
+  transform-origin: 50% 80%;
+}
+.pet-play {
+  animation: jumpbob 0.55s infinite ease-in-out;
+}
 @keyframes runbob {
   from {
-    transform: translate(-50%, -54%);
+    transform: translateY(-4px);
   }
   to {
-    transform: translate(-50%, -46%);
+    transform: translateY(4px);
   }
 }
 @keyframes lookbob {
   from {
-    rotate: -3deg;
+    transform: rotate(-4deg);
   }
   to {
-    rotate: 3deg;
+    transform: rotate(4deg);
   }
 }
 @keyframes breathe {
   0%,
   100% {
-    scale: 1;
+    transform: scale(1);
   }
   50% {
-    scale: 0.97;
+    transform: scale(0.96);
+  }
+}
+@keyframes nodbob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(3px) rotate(6deg);
+  }
+}
+@keyframes jumpbob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  40% {
+    transform: translateY(-7px) scale(0.96, 1.04);
+  }
+  70% {
+    transform: translateY(0) scale(1.04, 0.96);
   }
 }
 @keyframes routeDash {
@@ -162,6 +228,18 @@ body {
   }
   to {
     transform: none;
+    opacity: 1;
+  }
+}
+/* 仅淡入（不改 transform），用于自带定位 transform 的浮层，避免入场时位移错位 */
+.animate-fade {
+  animation: fadein 0.18s ease;
+}
+@keyframes fadein {
+  from {
+    opacity: 0.2;
+  }
+  to {
     opacity: 1;
   }
 }

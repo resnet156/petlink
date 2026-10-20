@@ -36,7 +36,7 @@ export function ActionModal() {
   const open = useStore((s) => s.modal === 'action')
   const close = useStore((s) => s.closeModal)
   return (
-    <Modal open={open} onClose={close} title="动作识别" eyebrow="ACTION RECOGNITION" desc="来自摄像头、项圈 IMU 与设备事件的行为汇总（原型为 mock）。" testId="action-modal">
+    <Modal open={open} onClose={close} title="动作识别" eyebrow="ACTION RECOGNITION" desc="来自摄像头、项圈传感与设备事件的行为汇总（演示数据）。" testId="action-modal">
       <div className="grid grid-cols-2 gap-3">
         {ACTIONS.map((a) => (
           <div key={a.t} className="rounded-2xl border border-line bg-white p-4">

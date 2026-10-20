@@ -19,8 +19,17 @@ export function LostModal() {
   const lastRoom = useStore((s) => s.homeMap.rooms.find((r) => r.id === lost.lastRoomId)?.name) ?? room?.name ?? '家附近'
 
   useEffect(() => {
-    if (open && miniRef.current) drawShareCard(miniRef.current, pet.name, lastRoom)
-  }, [open, pet.name, lastRoom])
+    if (open && miniRef.current)
+      drawShareCard(miniRef.current, {
+        name: pet.name,
+        species: pet.species,
+        furColor: pet.furColor,
+        collarColor: pet.collarColor,
+        photo: pet.photo,
+        lastRoom,
+        lastSeen: lost.lastUpdatedAt ? relativeTime(lost.lastUpdatedAt) : '刚刚',
+      })
+  }, [open, pet.name, pet.species, pet.furColor, pet.collarColor, pet.photo, lastRoom, lost.lastUpdatedAt])
 
   return (
     <Modal open={open} onClose={close} wide title="走失互寻" eyebrow="LOST MODE" desc="可关闭。开启后持续共享定位，并向附近宠友发布寻宠动态。" testId="lost-modal">

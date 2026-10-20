@@ -1,0 +1,12 @@
+# Insert inside the existing HTTPS site; validate before a graceful reload.
+# Do not replace the existing root route, TLS setup or business configuration.
+# If this site already has a global request_body limit, scope that original rule
+# to non-PetLink paths (keep its original value), then add the PetLink-only rule:
+# @notPetlink not path /petlink/*
+# request_body @notPetlink { max_size 21MB }
+# @petlinkUpload path /petlink/*
+# request_body @petlinkUpload { max_size 152MB }
+redir /petlink /petlink/ 308
+handle_path /petlink/* {
+    reverse_proxy 127.0.0.1:8091
+}

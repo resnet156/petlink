@@ -27,17 +27,17 @@ self.addEventListener('push', (event: PushEvent) => {
   const title = payload.title || 'PetLink'
   const options: NotificationOptions = {
     body: payload.body || '你有一条新的宠物提醒',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: new URL('icon-192.png', self.registration.scope).href,
+    badge: new URL('icon-192.png', self.registration.scope).href,
     tag: 'petlink-push',
-    data: { url: payload.url || '/' },
+    data: { url: payload.url || self.registration.scope },
   }
   event.waitUntil(self.registration.showNotification(title, options))
 })
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close()
-  const url = (event.notification.data && event.notification.data.url) || '/'
+  const url = (event.notification.data && event.notification.data.url) || self.registration.scope
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       for (const c of clients) {

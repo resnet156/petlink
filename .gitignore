@@ -1,6 +1,7 @@
 node_modules
 dist
 dist-ssr
+release
 *.local
 .DS_Store
 playwright-report
@@ -12,3 +13,17 @@ test-results
 .env
 .env.*
 !.env.example
+
+# Hardware MVP private state
+.private/
+.venv/
+__pycache__/
+.pytest_cache/
+*.sqlite3*
+.playwright-cli/
+
+# 户型识别调参生成的截图产物
+e2e/fixtures/_detect-result.png
+e2e/fixtures/_mask-*.png
+e2e/fixtures/_ml-*.png
+e2e/fixtures/_snap-test.png

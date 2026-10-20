@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { Point, Room } from '@/domain/types'
+import type { FurnitureItem, FurnitureType, Point, Room } from '@/domain/types'
 import {
   MAP_W,
   MAP_H,
@@ -12,8 +12,9 @@ import {
   rectPoints,
   roomCentroid,
 } from '@/domain/geometry'
+import { FURNITURE_META, defaultFurniture } from '@/components/map/furnitureLib'
 
-export type EditorTool = 'rect' | 'poly' | 'select'
+export type EditorTool = 'rect' | 'poly' | 'select' | 'furniture'
 
 export function useMapEditor() {
   const [rooms, setRooms] = useState<Room[]>([])
@@ -171,10 +172,62 @@ export function useMapEditor() {
 
   const setTool = useCallback((t: EditorTool) => { setToolState(t); if (t !== 'poly') setPolyDraft([]) }, [])
 
+  // ---- 家具编辑 ----
+  const [selectedFurn, setSelectedFurn] = useState<number>(-1)
+  const furnOf = useCallback((r: Room): FurnitureItem[] => r.furniture ?? defaultFurniture(r), [])
+  const mutateFurn = useCallback((furnIdx: number, fn: (f: FurnitureItem) => FurnitureItem, snap = true) => {
+    if (snap) snapshot()
+    setRooms((rs) => rs.map((r, i) => {
+      if (i !== selected) return r
+      const list = (r.furniture ?? defaultFurniture(r)).slice()
+      if (list[furnIdx]) list[furnIdx] = fn(clone(list[furnIdx]))
+      return { ...r, furniture: list }
+    }))
+  }, [selected, snapshot, defaultFurniture])
+  const addFurniture = useCallback((type: FurnitureType) => {
+    if (selected < 0) return
+    const room = rooms[selected]
+    if (!room) return
+    snapshot()
+    const b = bounds(room.polygon)
+    const meta = FURNITURE_META[type]
+    const list = (room.furniture ?? defaultFurniture(room)).slice()
+    const newIndex = list.length
+    list.push({ id: makeId('fn'), type, x: b.x + b.w / 2 - meta.w / 2, y: b.y + b.h / 2 - meta.h / 2, w: meta.w, h: meta.h })
+    // 纯函数式更新（不在 updater 内调用其它 setter，避免 StrictMode 双调用导致重复/错位）
+    setRooms((rs) => rs.map((r, i) => (i === selected ? { ...r, furniture: list } : r)))
+    setSelectedFurn(newIndex)
+  }, [selected, rooms, snapshot, defaultFurniture])
+  const moveFurn = useCallback((furnIdx: number, x: number, y: number) => mutateFurn(furnIdx, (f) => ({ ...f, x, y }), false), [mutateFurn])
+  const resizeFurn = useCallback((sx: number, sy: number) => {
+    if (selectedFurn < 0) return
+    mutateFurn(selectedFurn, (f) => ({ ...f, w: Math.max(16, f.w * sx), h: Math.max(12, f.h * sy) }))
+  }, [selectedFurn, mutateFurn])
+  const resizeFurnTo = useCallback((idx: number, w: number, h: number) => {
+    mutateFurn(idx, (f) => {
+      const cx = f.x + f.w / 2
+      const cy = f.y + f.h / 2
+      const nw = Math.max(16, w)
+      const nh = Math.max(12, h)
+      return { ...f, w: nw, h: nh, x: cx - nw / 2, y: cy - nh / 2 }
+    }, false)
+  }, [mutateFurn])
+  const rotateFurn = useCallback((deg: number) => {
+    if (selectedFurn < 0) return
+    mutateFurn(selectedFurn, (f) => ({ ...f, rotation: (((f.rotation ?? 0) + deg) % 360 + 360) % 360 }))
+  }, [selectedFurn, mutateFurn])
+  const deleteFurn = useCallback(() => {
+    if (selected < 0 || selectedFurn < 0) return
+    snapshot()
+    setRooms((rs) => rs.map((r, i) => (i === selected ? { ...r, furniture: (r.furniture ?? defaultFurniture(r)).filter((_, k) => k !== selectedFurn) } : r)))
+    setSelectedFurn(-1)
+  }, [selected, selectedFurn, snapshot, defaultFurniture])
+
   return {
     rooms, setRooms, selected, setSelected, tool, setTool, polyDraft, setPolyDraft,
     load, undo, redo, snapshot, addRect, addPreset, finishPoly, mutateSelected, mutateAt, renameAt,
     setName, setKind, nudge, scale, addVertex, removeVertex, duplicate, remove, clear, hitRoom,
+    selectedFurn, setSelectedFurn, furnOf, addFurniture, moveFurn, resizeFurn, resizeFurnTo, rotateFurn, deleteFurn,
     canUndo: () => undoStack.current.length > 0, canRedo: () => redoStack.current.length > 0,
     MAP_W, MAP_H, bounds,
   }
