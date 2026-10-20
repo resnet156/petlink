@@ -36,6 +36,18 @@ function effectiveHomeId(user: User | null, homeOwnerId: string | null): string 
   return homeOwnerId || user.id
 }
 
+/** 把 Supabase 英文错误转成更清楚的中文提示 */
+function friendlyAuthError(msg: string): string {
+  const m = msg.toLowerCase()
+  if (m.includes('invalid login credentials')) return '邮箱或密码错误。请确认两端用同一账号；旧版本/其它环境创建的账号可能无效，可直接重新注册。'
+  if (m.includes('email not confirmed')) return '邮箱尚未验证，请查收验证邮件后再登录。'
+  if (m.includes('user already registered') || m.includes('already registered')) return '该邮箱已注册，请直接登录。'
+  if (m.includes('password should be at least')) return '密码至少 6 位。'
+  if (m.includes('unable to validate email') || m.includes('invalid email')) return '邮箱格式不正确。'
+  if (m.includes('rate limit') || m.includes('too many')) return '操作过于频繁，请稍后再试。'
+  return msg
+}
+
 export const useAuth = create<AuthState>((set, get) => ({
   ready: !isCloudEnabled, // 未配置云端时视为已就绪（纯本地）
   user: null,
@@ -69,11 +81,15 @@ export const useAuth = create<AuthState>((set, get) => ({
       const home = effectiveHomeId(user, get().homeOwnerId)
       if (user && home && user.id !== prev?.id) {
         set({ syncing: true })
-        await pullFromCloud(home)
-        startCloudSync(home)
-        set({ syncing: false })
+        try {
+          await pullFromCloud(home)
+          startCloudSync(home)
+        } finally {
+          set({ syncing: false })
+        }
       } else if (!user) {
         stopCloudSync()
+        set({ syncing: false })
       }
     })
   },
@@ -82,21 +98,26 @@ export const useAuth = create<AuthState>((set, get) => ({
     if (!supabase) return
     set({ error: null })
     const { error } = await supabase.auth.signUp({ email, password })
-    if (error) set({ error: error.message })
+    if (error) set({ error: friendlyAuthError(error.message) })
   },
 
   signIn: async (email, password) => {
     if (!supabase) return
     set({ error: null })
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) set({ error: error.message })
+    if (error) set({ error: friendlyAuthError(error.message) })
   },
 
   signOut: async () => {
-    if (!supabase) return
+    // 先清本地状态，保证 UI 立刻退出登录，即使网络请求卡住
     stopCloudSync()
-    await supabase.auth.signOut()
-    set({ user: null })
+    setStoredHome(null)
+    set({ user: null, homeOwnerId: null, syncing: false, error: null })
+    try {
+      await supabase?.auth.signOut()
+    } catch {
+      /* 忽略：本地已退出 */
+    }
   },
 
   resetPassword: async (email) => {
@@ -144,9 +165,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     setStoredHome(id)
     set({ homeOwnerId: id, syncing: true })
     stopCloudSync()
-    await pullFromCloud(id)
-    startCloudSync(id)
-    set({ syncing: false })
+    try {
+      await pullFromCloud(id)
+      startCloudSync(id)
+    } finally {
+      set({ syncing: false })
+    }
     return true
   },
 
@@ -159,9 +183,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     setStoredHome(null)
     set({ homeOwnerId: null, syncing: true })
     stopCloudSync()
-    await pullFromCloud(user.id)
-    startCloudSync(user.id)
-    set({ syncing: false })
+    try {
+      await pullFromCloud(user.id)
+      startCloudSync(user.id)
+    } finally {
+      set({ syncing: false })
+    }
   },
 
   setSyncing: (v) => set({ syncing: v }),

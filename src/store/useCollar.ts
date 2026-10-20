@@ -2,10 +2,41 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { activityToBehavior, liveActivity, parseLive, type CollarActivity, type CollarLive } from '@/domain/collar'
 import { useStore } from './useStore'
+import { useAuth } from './useAuth'
 
 const TOKEN_KEY = 'petlink-viewer-token'
+const BINDING_KEY = 'petlink-collar-bindings-v1'
 function readToken() { try { return sessionStorage.getItem(TOKEN_KEY) || '' } catch { return '' } }
 export const apiUrl = (path: string) => `${import.meta.env.BASE_URL}api/${path}`
+
+function bindingStorageKey() {
+  const auth = useAuth.getState()
+  if (!auth.ready) return ''
+  const identity = auth.user ? `${auth.user.id}:${auth.homeOwnerId || auth.user.id}` : 'local'
+  return `${BINDING_KEY}:${encodeURIComponent(identity)}`
+}
+
+function readBinding(deviceId: string) {
+  const key = bindingStorageKey()
+  if (!key || !deviceId) return null
+  try {
+    const record = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, unknown>
+    return typeof record[deviceId] === 'string' ? record[deviceId] as string : null
+  } catch { return null }
+}
+
+function saveBinding(deviceId: string, petId: string | null) {
+  const key = bindingStorageKey()
+  if (!key) return false
+  try {
+    const record = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, unknown>
+    const next = record && typeof record === 'object' && !Array.isArray(record) ? record : {}
+    if (petId) next[deviceId] = petId
+    else delete next[deviceId]
+    localStorage.setItem(key, JSON.stringify(next))
+    return true
+  } catch { return false }
+}
 
 type CollarState = {
   token: string
@@ -15,26 +46,47 @@ type CollarState = {
   activity: CollarActivity
   now: number
   health: { version: string; commit: string } | null
+  boundPetId: string | null
   connectionRevision: number
   setToken: (token: string) => void
+  bindPet: (petId: string | null) => void
 }
 
 export const useCollar = create<CollarState>((set) => ({
-  token: readToken(), live: null, phase: 'locked', error: '', activity: 'unknown', now: Date.now(), health: null, connectionRevision: 0,
+  token: readToken(), live: null, phase: 'locked', error: '', activity: 'unknown', now: Date.now(), health: null, boundPetId: null, connectionRevision: 0,
   setToken: (token) => {
     const clean = token.trim()
+    const previous = useCollar.getState()
+    if (previous.token && clean !== previous.token && previous.live?.device?.deviceId) applyCollarActivity(previous.live.device.deviceId, 'unknown')
     try { if (clean) sessionStorage.setItem(TOKEN_KEY, clean); else sessionStorage.removeItem(TOKEN_KEY) } catch { /* Session may forbid storage; keep in memory. */ }
-    set((state) => ({ token: clean, live: null, activity: 'unknown', error: '', phase: clean ? 'connecting' : 'locked', connectionRevision: state.connectionRevision + 1 }))
+    set((state) => ({ token: clean, live: null, activity: 'unknown', error: '', boundPetId: null, phase: clean ? 'connecting' : 'locked', connectionRevision: state.connectionRevision + 1 }))
+  },
+  bindPet: (petId) => {
+    const state = useCollar.getState()
+    const deviceId = state.live?.device?.deviceId
+    if (!state.token || state.phase !== 'connected' || !deviceId) return
+    if (petId && !useStore.getState().pets.some((pet) => pet.id === petId)) return
+    if (!saveBinding(deviceId, petId)) return
+    set({ boundPetId: petId })
+    if (petId) {
+      const activity = state.live?.latest?.deviceId === deviceId ? state.activity : 'unknown'
+      applyCollarActivity(deviceId, activity, activity === 'unknown' ? undefined : state.live?.latest?.receivedAt)
+    }
   },
 }))
 
-function syncPet(activity: CollarActivity, receivedAt?: number) {
+/** IMU may update only the pet explicitly paired with this device. */
+export function applyCollarActivity(deviceId: string, activity: CollarActivity, receivedAt?: number) {
+  const collar = useCollar.getState()
+  if (!collar.token || !deviceId || collar.live?.device?.deviceId !== deviceId || !collar.boundPetId) return
   const store = useStore.getState()
+  const bound = store.pets.find((pet) => pet.id === collar.boundPetId)
+  if (!bound) return
   const behavior = activityToBehavior[activity]
-  if (store.pet.behavior === behavior && (!receivedAt || store.pet.lastUpdatedAt === receivedAt)) return
-  const pets = store.pets.map((pet) => pet.id === store.activePetId ? { ...pet, behavior, lastUpdatedAt: receivedAt ?? pet.lastUpdatedAt } : pet)
+  if (bound.behavior === behavior && (!receivedAt || bound.lastUpdatedAt === receivedAt)) return
+  const pets = store.pets.map((pet) => pet.id === collar.boundPetId ? { ...pet, behavior, lastUpdatedAt: receivedAt ?? pet.lastUpdatedAt } : pet)
   // IMU describes motion only. Never change location, battery, feeding, or sleeping state.
-  useStore.setState({ pets, pet: pets.find((pet) => pet.id === store.activePetId)! })
+  useStore.setState({ pets, pet: store.activePetId === collar.boundPetId ? pets.find((pet) => pet.id === collar.boundPetId)! : store.pet })
 }
 
 export function useCollarConnection() {
@@ -55,8 +107,7 @@ export function useCollarConnection() {
     let timer = 0
     let controller: AbortController | null = null
     let requestTimeout = 0
-    syncPet('unknown')
-    if (!token) { useCollar.setState({ phase: 'locked', activity: 'unknown' }); return }
+    if (!token) { useCollar.setState({ phase: 'locked', activity: 'unknown', boundPetId: null }); return }
     useCollar.setState({ phase: 'connecting', error: '' })
 
     const poll = async () => {
@@ -71,13 +122,15 @@ export function useCollarConnection() {
         const live = parseLive(await response.json())
         if (cancelled) return
         const now = Date.now()
-        const activity = liveActivity(live, now, true)
-        useCollar.setState({ live, phase: 'connected', activity, error: '', now })
-        syncPet(activity, activity === 'unknown' ? undefined : live.latest?.receivedAt)
+        const activity = live.device?.deviceId && live.latest?.deviceId === live.device.deviceId ? liveActivity(live, now, true) : 'unknown'
+        const boundPetId = live.device?.deviceId ? readBinding(live.device.deviceId) : null
+        useCollar.setState({ live, phase: 'connected', activity, error: '', now, boundPetId })
+        if (live.device?.deviceId) applyCollarActivity(live.device.deviceId, activity, activity === 'unknown' ? undefined : live.latest?.receivedAt)
       } catch (error) {
         if (cancelled) return
         useCollar.setState({ phase: 'error', activity: 'unknown', error: error instanceof Error && error.name !== 'AbortError' ? error.message : '连接超时，正在重试' })
-        syncPet('unknown')
+        const state = useCollar.getState()
+        if (state.live?.device?.deviceId) applyCollarActivity(state.live.device.deviceId, 'unknown')
         delay = 3000
       } finally {
         clearTimeout(requestTimeout)
@@ -88,9 +141,9 @@ export function useCollarConnection() {
     const clock = window.setInterval(() => {
       const now = Date.now()
       const state = useCollar.getState()
-      const activity = liveActivity(state.live, now, state.phase === 'connected')
+      const activity = state.live?.device?.deviceId && state.live.latest?.deviceId === state.live.device.deviceId ? liveActivity(state.live, now, state.phase === 'connected') : 'unknown'
       useCollar.setState({ now, activity })
-      if (activity === 'unknown') syncPet('unknown')
+      if (activity === 'unknown' && state.live?.device?.deviceId) applyCollarActivity(state.live.device.deviceId, 'unknown')
     }, 1000)
     return () => { cancelled = true; clearTimeout(timer); clearTimeout(requestTimeout); clearInterval(clock); controller?.abort() }
   }, [token, connectionRevision])

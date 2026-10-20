@@ -19,6 +19,8 @@ type Props = {
   viewAzimuth?: number
   clipMap?: PetClipMap
   headScale?: number
+  /** Hide the display plinth in the transparent desktop-pet window. */
+  stand?: boolean
   onModelInfo: (info: PetModelInfo) => void
 }
 
@@ -108,7 +110,7 @@ function buildPet(color: string) {
   return { root, torso, head, legs, tail }
 }
 
-export function PetScene({ activity, color, room, model, viewAzimuth, clipMap, headScale = 1, onModelInfo }: Props) {
+export function PetScene({ activity, color, room, model, viewAzimuth, clipMap, headScale = 1, stand = true, onModelInfo }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const activityRef = useRef(activity)
   activityRef.current = activity
@@ -198,7 +200,7 @@ export function PetScene({ activity, color, room, model, viewAzimuth, clipMap, h
       for (let z = -room.depth / 2; z <= room.depth / 2; z += 1) gridPoints.push(-room.width / 2, -.005, z, room.width / 2, -.005, z)
       const grid = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(gridPoints, 3)), new THREE.LineBasicMaterial({ color: '#c7b599' }))
       scene.add(grid)
-    } else {
+    } else if (stand) {
       const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.8, .14, 96), new THREE.MeshStandardMaterial({ color: '#eceae0', roughness: .64 }))
       pedestal.position.y = -.09
       pedestal.receiveShadow = true
@@ -211,7 +213,7 @@ export function PetScene({ activity, color, room, model, viewAzimuth, clipMap, h
     const pet = buildPet(color)
     pet.root.traverse((object) => { if (object instanceof THREE.Mesh) object.layers.enable(1) })
     scene.add(pet.root)
-    const contactShadow = room ? null : createContactShadow(renderer, scene)
+    const contactShadow = room || !stand ? null : createContactShadow(renderer, scene)
     let shadowDirty = true
     let loaded: THREE.Group | null = null
     let animation: PetAnimationController | null = null
@@ -319,7 +321,7 @@ export function PetScene({ activity, color, room, model, viewAzimuth, clipMap, h
       delete element.dataset.motionMode; delete element.dataset.motionClip
       delete element.dataset.rigged; delete element.dataset.boneCount
     }
-  }, [color, room, model, viewAzimuth, headScale, onModelInfo])
+  }, [color, room, model, viewAzimuth, headScale, stand, onModelInfo])
 
   return <div className="collar-scene" ref={host}>{error && <div className="collar-scene-error" role="status">{error}</div>}</div>
 }

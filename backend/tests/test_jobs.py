@@ -1,6 +1,8 @@
 import asyncio
 import io
 import json
+from pathlib import Path
+import sqlite3
 import struct
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
@@ -48,8 +50,10 @@ def client(tmp_path, monkeypatch):
         yield client
 
 
-def upload(client, kind='pet'):
-    r = client.post('/api/jobs',data={'kind':kind},files={'files[]':('pet.png',PNG,'image/png')},headers=auth(VIEW))
+def upload(client, kind='pet', pet_id=None):
+    data = {'kind': kind}
+    if pet_id is not None: data['petId'] = pet_id
+    r = client.post('/api/jobs',data=data,files={'files[]':('pet.png',PNG,'image/png')},headers=auth(VIEW))
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -112,6 +116,93 @@ def test_heartbeat(client):
     assert not client.get('/api/jobs',headers=auth(VIEW)).json()['worker']['online']
     client.post('/api/worker/heartbeat',json={'capabilities':['pet']},headers=auth(WORKER))
     assert client.get('/api/jobs',headers=auth(VIEW)).json()['worker']=={'online':True,'capabilities':['pet']}
+
+
+def test_animated_avatar_requires_capable_worker_and_pet_id(client):
+    response = client.post('/api/jobs', data={'kind': 'pet_avatar', 'petId': 'pet_maoqiu'},
+                           files={'files[]': ('pet.png', PNG, 'image/png')}, headers=auth(VIEW))
+    assert response.status_code == 503
+    client.post('/api/worker/heartbeat', json={'capabilities': ['pet_avatar']}, headers=auth(WORKER))
+    missing_id = client.post('/api/jobs', data={'kind': 'pet_avatar'},
+                             files={'files[]': ('pet.png', PNG, 'image/png')}, headers=auth(VIEW))
+    assert missing_id.status_code == 422
+    job = upload(client, kind='pet_avatar', pet_id='pet_maoqiu')
+    assert job['petId'] == 'pet_maoqiu'
+    assert claim(client)['petId'] == 'pet_maoqiu'
+
+
+def test_avatar_job_waits_when_worker_loses_avatar_capability(client):
+    client.post('/api/worker/heartbeat', json={'capabilities': ['pet_avatar']}, headers=auth(WORKER))
+    job = upload(client, kind='pet_avatar', pet_id='pet_tuanzi')
+    client.post('/api/worker/heartbeat', json={'capabilities': ['pet', 'room']}, headers=auth(WORKER))
+    assert claim(client) is None
+    listed = client.get('/api/jobs', headers=auth(VIEW)).json()['jobs']
+    assert listed[0]['id'] == job['id'] and listed[0]['status'] == 'queued'
+
+
+def test_workers_claim_only_their_own_capabilities(client):
+    static_id, avatar_id = '1' * 32, '2' * 32
+    assert client.post('/api/worker/heartbeat', json={'workerId': static_id, 'capabilities': ['pet', 'room']}, headers=auth(WORKER)).status_code == 200
+    assert client.post('/api/worker/heartbeat', json={'workerId': avatar_id, 'capabilities': ['pet_avatar']}, headers=auth(WORKER)).status_code == 200
+    listed = client.get('/api/jobs', headers=auth(VIEW)).json()['worker']
+    assert listed == {'online': True, 'capabilities': ['pet', 'pet_avatar', 'room']}
+    avatar = upload(client, kind='pet_avatar', pet_id='pet_maoqiu')
+    static = upload(client, kind='pet')
+    first = client.post('/api/worker/claim', json={'workerId': static_id}, headers=auth(WORKER)).json()['job']
+    second = client.post('/api/worker/claim', json={'workerId': avatar_id}, headers=auth(WORKER)).json()['job']
+    assert first['id'] == static['id'] and second['id'] == avatar['id']
+    assert client.post('/api/worker/claim', json={'workerId': '3' * 32}, headers=auth(WORKER)).status_code == 409
+
+
+def test_legacy_worker_never_claims_avatar_from_new_worker(client):
+    avatar_id = '4' * 32
+    client.post('/api/worker/heartbeat', json={'workerId': avatar_id, 'capabilities': ['pet_avatar']}, headers=auth(WORKER))
+    job = upload(client, kind='pet_avatar', pet_id='pet_maoqiu')
+    assert claim(client) is None
+    new_claim = client.post('/api/worker/claim', json={'workerId': avatar_id}, headers=auth(WORKER)).json()['job']
+    assert new_claim['id'] == job['id']
+
+
+def test_static_mesh_cannot_masquerade_as_animated_avatar(client, tmp_path):
+    client.post('/api/worker/heartbeat', json={'capabilities': ['pet_avatar']}, headers=auth(WORKER))
+    upload(client, kind='pet_avatar', pet_id='pet_maoqiu')
+    job = claim(client)
+    fake_metadata = json.dumps({'method': 'fake', 'rigged': True, 'animated': True, 'limitations': []}).encode()
+    response = complete(client, job, [('model.glb', GLB), ('result.json', fake_metadata)])
+    assert response.status_code == 422
+    assert_no_results(tmp_path, job)
+
+
+def test_animated_avatar_returns_verified_rig_and_clips(client):
+    client.post('/api/worker/heartbeat', json={'capabilities': ['pet_avatar']}, headers=auth(WORKER))
+    upload(client, kind='pet_avatar', pet_id='pet_maoqiu')
+    job = claim(client)
+    source = Path(__file__).parents[2] / 'public/models/quaternius-shiba-chibi.glb'
+    response = complete(client, job, [('model.glb', source.read_bytes()), ('result.json', METADATA)])
+    assert response.status_code == 200, response.text
+    result = response.json()['result']
+    assert result['rigged'] is True and result['animated'] is True
+    assert 'Idle' in result['animations'] and 'Walk' in result['animations']
+    assert response.json()['petId'] == 'pet_maoqiu'
+    assert client.get('/api/jobs', headers=auth(VIEW)).json()['jobs'][0]['petId'] == 'pet_maoqiu'
+
+
+def test_existing_media_jobs_migrate_without_losing_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv('PETLINK_WORKER_TOKEN', WORKER)
+    database = tmp_path / 'old.db'
+    with sqlite3.connect(database) as db:
+        db.execute('''CREATE TABLE media_jobs (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, stage TEXT NOT NULL,
+            inputs TEXT NOT NULL, result TEXT, error TEXT, lease TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+            result_dir TEXT)''')
+        db.execute('INSERT INTO media_jobs(id,kind,status,created_at,updated_at,stage,inputs) VALUES(?,?,?,?,?,?,?)',
+                   ('older', 'pet', 'succeeded', 1, 1, 'done', '[]'))
+    with TestClient(create_app(database, VIEW, DEVICE, tmp_path)) as old_client:
+        listed = old_client.get('/api/jobs', headers=auth(VIEW)).json()['jobs']
+        assert listed[0]['id'] == 'older' and listed[0]['petId'] is None
+    with sqlite3.connect(database) as db:
+        assert 'pet_id' in {row[1] for row in db.execute('PRAGMA table_info(media_jobs)')}
 
 
 @pytest.mark.parametrize('model', [

@@ -1,15 +1,16 @@
-export type ReconstructionKind = 'pet' | 'room'
+export type ReconstructionKind = 'pet' | 'room' | 'pet_avatar'
 export type MediaMode = 'image' | 'video'
 export type ReconstructionJob = {
   id: string
   kind: ReconstructionKind
+  petId?: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   createdAt: number
   updatedAt: number
   stage: string
   error?: string
   inputs?: { name: string; mime: string; url: string }[]
-  result?: { modelUrl?: string; layoutUrl?: string; previewUrl?: string; method: string; limitations: string[] }
+  result?: { modelUrl?: string; layoutUrl?: string; previewUrl?: string; method: string; limitations: string[]; rigged?: boolean; animated?: boolean; animations?: string[] }
 }
 export type ReconstructionJobs = { jobs: ReconstructionJob[]; worker?: { online: boolean; capabilities: string[] } }
 export type ReconstructionLayout = {
@@ -26,7 +27,7 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 
 export function validateMedia(files: Pick<File, 'name' | 'size' | 'type'>[], kind: ReconstructionKind, mode: MediaMode) {
   if (!files.length) throw new Error('请先选择照片或视频')
-  if ((mode === 'video' || kind === 'pet') && files.length !== 1) throw new Error(mode === 'video' ? '每个任务请选择一个视频' : '宠物照片任务请选择一张清晰照片')
+  if ((mode === 'video' || kind !== 'room') && files.length !== 1) throw new Error(mode === 'video' ? '每个任务请选择一个视频' : '宠物照片任务请选择一张清晰照片')
   let total = 0
   for (const file of files) {
     if (file.size <= 0) throw new Error(`${file.name} 是空文件`)
@@ -40,7 +41,7 @@ export function validateMedia(files: Pick<File, 'name' | 'size' | 'type'>[], kin
 export function parseJobs(value: unknown): ReconstructionJobs {
   if (!object(value) || !Array.isArray(value.jobs)) throw new Error('任务服务返回格式不正确')
   const jobs = value.jobs.map((job: unknown) => {
-    if (!object(job) || typeof job.id !== 'string' || !['pet', 'room'].includes(String(job.kind))
+    if (!object(job) || typeof job.id !== 'string' || !['pet', 'room', 'pet_avatar'].includes(String(job.kind))
       || !Object.prototype.hasOwnProperty.call(jobStatusLabels, String(job.status)) || typeof job.stage !== 'string') throw new Error('任务数据格式不正确')
     if (typeof job.createdAt !== 'number' || !Number.isFinite(job.createdAt) || typeof job.updatedAt !== 'number' || !Number.isFinite(job.updatedAt)) throw new Error('任务时间格式不正确')
     const result = object(job.result) ? {
@@ -49,9 +50,12 @@ export function parseJobs(value: unknown): ReconstructionJobs {
       modelUrl: typeof job.result.modelUrl === 'string' ? job.result.modelUrl : undefined,
       layoutUrl: typeof job.result.layoutUrl === 'string' ? job.result.layoutUrl : undefined,
       previewUrl: typeof job.result.previewUrl === 'string' ? job.result.previewUrl : undefined,
+      rigged: job.result.rigged === true,
+      animated: job.result.animated === true,
+      animations: Array.isArray(job.result.animations) ? job.result.animations.filter((item): item is string => typeof item === 'string') : [],
     } : undefined
     const inputs = Array.isArray(job.inputs) ? job.inputs.filter((input): input is { name: string; mime: string; url: string } => object(input) && typeof input.name === 'string' && typeof input.mime === 'string' && typeof input.url === 'string') : []
-    return { ...job, result, inputs, error: typeof job.error === 'string' ? job.error : undefined } as ReconstructionJob
+    return { ...job, petId: typeof job.petId === 'string' ? job.petId : undefined, result, inputs, error: typeof job.error === 'string' ? job.error : undefined } as ReconstructionJob
   })
   const worker = object(value.worker) && typeof value.worker.online === 'boolean' && Array.isArray(value.worker.capabilities)
     ? { online: value.worker.online, capabilities: value.worker.capabilities.filter((v): v is string => typeof v === 'string') } : undefined

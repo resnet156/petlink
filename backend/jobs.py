@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import struct
@@ -118,6 +119,69 @@ def validate_glb(path):
     for item in images:
         if not isinstance(item, dict) or not integer(item.get("bufferView")) or item["bufferView"] >= len(views): invalid()
         if item.get("mimeType") not in ("image/png", "image/jpeg", "image/webp"): invalid()
+    return document
+
+
+def validate_animated_pet(document):
+    """A desktop avatar must have skinned geometry and real joint animation."""
+    def invalid():
+        raise HTTPException(422, "Pet avatar requires a skinned GLB with idle and walk animations")
+
+    nodes = document.get("nodes", [])
+    skins = document.get("skins", [])
+    animations = document.get("animations", [])
+    if not isinstance(nodes, list) or not isinstance(skins, list) or not isinstance(animations, list): invalid()
+    used_skins = set()
+    for node in nodes:
+        if not isinstance(node, dict): invalid()
+        if "skin" in node and "mesh" in node:
+            skin = node["skin"]
+            if type(skin) is not int or skin < 0 or skin >= len(skins): invalid()
+            mesh_index = node["mesh"]
+            meshes = document.get("meshes", [])
+            if type(mesh_index) is not int or mesh_index < 0 or mesh_index >= len(meshes): invalid()
+            weighted = False
+            accessors = document.get("accessors", [])
+            for primitive in meshes[mesh_index]["primitives"]:
+                attributes = primitive["attributes"]
+                if not all(key in attributes for key in ("POSITION", "JOINTS_0", "WEIGHTS_0")): continue
+                position, bone_ids, weights = (accessors[attributes[key]] for key in ("POSITION", "JOINTS_0", "WEIGHTS_0"))
+                if (bone_ids.get("type") != "VEC4" or bone_ids.get("componentType") not in (5121, 5123)
+                    or weights.get("type") != "VEC4" or weights.get("componentType") not in (5121, 5123, 5126)
+                    or position["count"] != bone_ids["count"] or position["count"] != weights["count"]): invalid()
+                weighted = True
+            if not weighted: invalid()
+            used_skins.add(skin)
+    if not used_skins: invalid()
+    joints = set()
+    for index in used_skins:
+        skin = skins[index]
+        if not isinstance(skin, dict) or not isinstance(skin.get("joints"), list) or len(skin["joints"]) < 4: invalid()
+        for joint in skin["joints"]:
+            if type(joint) is not int or joint < 0 or joint >= len(nodes): invalid()
+            joints.add(joint)
+    names = []
+    for animation in animations:
+        if not isinstance(animation, dict) or not isinstance(animation.get("channels"), list) or not isinstance(animation.get("samplers"), list): invalid()
+        name = animation.get("name")
+        if not isinstance(name, str) or not name.strip(): invalid()
+        moving_joint = False
+        for channel in animation["channels"]:
+            if not isinstance(channel, dict) or not isinstance(channel.get("target"), dict): invalid()
+            sampler = channel.get("sampler")
+            if type(sampler) is not int or sampler < 0 or sampler >= len(animation["samplers"]): invalid()
+            definition = animation["samplers"][sampler]
+            accessors = document.get("accessors", [])
+            if not isinstance(definition, dict) or any(type(definition.get(key)) is not int or definition[key] < 0 or definition[key] >= len(accessors)
+                                                      for key in ("input", "output")): invalid()
+            target = channel["target"]
+            node_index = target.get("node")
+            if type(node_index) is not int or node_index < 0 or node_index >= len(nodes): invalid()
+            if node_index in joints and target.get("path") in ("rotation", "translation", "scale"):
+                moving_joint = True
+        if moving_joint: names.append(name.strip())
+    if not any("idle" in name.lower() for name in names) or not any("walk" in name.lower() for name in names): invalid()
+    return names
 
 
 def validate_layout(path):
@@ -153,6 +217,11 @@ def media_type(data):
 
 class Heartbeat(BaseModel):
     capabilities: list[str] = Field(default_factory=list, max_length=10)
+    workerId: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+
+
+class Claim(BaseModel):
+    workerId: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 class Progress(BaseModel):
@@ -182,12 +251,16 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
           id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL,
           created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, stage TEXT NOT NULL,
           inputs TEXT NOT NULL, result TEXT, error TEXT, lease TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-          result_dir TEXT);
+          result_dir TEXT, pet_id TEXT);
         CREATE TABLE IF NOT EXISTS model_worker (
           id INTEGER PRIMARY KEY CHECK(id=1), seen_at INTEGER NOT NULL, capabilities TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS model_worker_sessions (
+          id TEXT PRIMARY KEY, seen_at INTEGER NOT NULL, capabilities TEXT NOT NULL);
         """)
         if "result_dir" not in {row[1] for row in db.execute("PRAGMA table_info(media_jobs)")}:
             db.execute("ALTER TABLE media_jobs ADD COLUMN result_dir TEXT")
+        if "pet_id" not in {row[1] for row in db.execute("PRAGMA table_info(media_jobs)")}:
+            db.execute("ALTER TABLE media_jobs ADD COLUMN pet_id TEXT")
 
     def storage_bytes():
         used = 0
@@ -219,10 +292,19 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
 
     def now(): return int(time.time()*1000)
 
+    def available_capabilities(db):
+        fresh = now() - 45000
+        rows = db.execute("SELECT capabilities FROM model_worker_sessions WHERE seen_at >= ?", (fresh,)).fetchall()
+        legacy = db.execute("SELECT capabilities FROM model_worker WHERE id=1 AND seen_at >= ?", (fresh,)).fetchone()
+        if legacy: rows.append(legacy)
+        return sorted({kind for row in rows for kind in json.loads(row["capabilities"])
+                       if kind in ("pet", "pet_avatar", "room")})
+
     def row_job(row, worker=False):
         result = {"id": row["id"], "kind": row["kind"], "status": row["status"],
                   "createdAt": row["created_at"], "updatedAt": row["updated_at"],
                   "stage": row["stage"], "error": row["error"],
+                  "petId": row["pet_id"],
                   "inputs": json.loads(row["inputs"]), "result": json.loads(row["result"]) if row["result"] else None}
         if worker: result["lease"] = row["lease"]
         return result
@@ -242,17 +324,25 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
     def list_jobs():
         with db_open() as db:
             rows = db.execute("SELECT * FROM media_jobs ORDER BY created_at DESC LIMIT 50").fetchall()
-            worker = db.execute("SELECT * FROM model_worker WHERE id=1").fetchone()
+            capabilities = available_capabilities(db)
         return {"jobs": [row_job(row) for row in rows], "worker": {
-            "online": bool(worker and now()-worker["seen_at"] < 45000),
-            "capabilities": json.loads(worker["capabilities"]) if worker else []}}
+            "online": bool(capabilities), "capabilities": capabilities}}
 
     @router.post("/api/jobs", dependencies=[Depends(viewer)])
-    async def create_job(kind: str = Form(...), files: list[UploadFile] = File(..., alias="files[]")):
-        if kind not in ("pet", "room") or not 1 <= len(files) <= 12:
-            raise HTTPException(422, "Choose pet/room and 1-12 images or one video")
+    async def create_job(kind: str = Form(...), petId: Optional[str] = Form(default=None), files: list[UploadFile] = File(..., alias="files[]")):
+        if kind not in ("pet", "pet_avatar", "room") or not 1 <= len(files) <= 12:
+            raise HTTPException(422, "Choose pet/pet_avatar/room and 1-12 images or one video")
+        if kind == "pet_avatar" and len(files) != 1:
+            raise HTTPException(422, "Pet avatar accepts one photo or one video per job")
+        if kind == "pet_avatar" and (not petId or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", petId)):
+            raise HTTPException(422, "Pet avatar requires a valid petId")
+        if kind != "pet_avatar" and petId is not None:
+            raise HTTPException(422, "petId is only supported for pet_avatar jobs")
         with db_open() as db:
             check_queue_capacity(db)
+            if kind == "pet_avatar":
+                if kind not in available_capabilities(db):
+                    raise HTTPException(503, "Animated pet avatar worker is not available")
         job_id = uuid.uuid4().hex
         folder = root / job_id / "inputs"
         folder.mkdir(parents=True, mode=0o700)
@@ -280,8 +370,8 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
             with db_open() as db:
                 db.execute("BEGIN IMMEDIATE")
                 check_queue_capacity(db)
-                db.execute("INSERT INTO media_jobs(id,kind,status,created_at,updated_at,stage,inputs) VALUES(?,?,?,?,?,?,?)",
-                           (job_id, kind, "queued", now(), now(), "等待本地推理节点领取", json.dumps(inputs)))
+                db.execute("INSERT INTO media_jobs(id,kind,status,created_at,updated_at,stage,inputs,pet_id) VALUES(?,?,?,?,?,?,?,?)",
+                           (job_id, kind, "queued", now(), now(), "等待本地推理节点领取", json.dumps(inputs), petId))
                 row = get_job(db, job_id)
             return row_job(row)
         except BaseException:
@@ -337,15 +427,29 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
     @router.post("/api/worker/heartbeat", dependencies=[Depends(worker_auth)])
     def heartbeat(data: Heartbeat):
         with db_open() as db:
-            db.execute("INSERT INTO model_worker VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET seen_at=excluded.seen_at,capabilities=excluded.capabilities", (now(), json.dumps(data.capabilities)))
+            if data.workerId:
+                db.execute("INSERT INTO model_worker_sessions VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET seen_at=excluded.seen_at,capabilities=excluded.capabilities", (data.workerId, now(), json.dumps(data.capabilities)))
+            else:
+                db.execute("INSERT INTO model_worker VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET seen_at=excluded.seen_at,capabilities=excluded.capabilities", (now(), json.dumps(data.capabilities)))
         return {"ok": True}
 
     @router.post("/api/worker/claim", dependencies=[Depends(worker_auth)])
-    def claim():
+    def claim(data: Optional[Claim] = None):
         with db_open() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("UPDATE media_jobs SET status='failed',stage='推理节点失联，可重试',error='Worker lease expired',lease=NULL,updated_at=? WHERE status='running' AND updated_at < ?", (now(), now()-180000))
-            row = db.execute("SELECT * FROM media_jobs WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+            if data and data.workerId:
+                worker = db.execute("SELECT * FROM model_worker_sessions WHERE id=? AND seen_at >= ?", (data.workerId, now()-45000)).fetchone()
+                if not worker: raise HTTPException(409, "Worker session has no fresh heartbeat")
+                claimed = json.loads(worker["capabilities"])
+            else:
+                # Legacy workers never advertised pet_avatar and cannot claim it.
+                worker = db.execute("SELECT * FROM model_worker WHERE id=1 AND seen_at >= ?", (now()-45000,)).fetchone()
+                claimed = json.loads(worker["capabilities"]) if worker else ["pet", "room"]
+            capabilities = [kind for kind in claimed if kind in ("pet", "pet_avatar", "room")]
+            if not capabilities: return {"job": None}
+            placeholders = ",".join("?" for _ in capabilities)
+            row = db.execute(f"SELECT * FROM media_jobs WHERE status='queued' AND kind IN ({placeholders}) ORDER BY created_at LIMIT 1", capabilities).fetchone()
             if not row: return {"job": None}
             lease = uuid.uuid4().hex
             db.execute("UPDATE media_jobs SET status='running',stage='正在读取输入',updated_at=?,lease=?,attempts=attempts+1 WHERE id=?", (now(), lease, row["id"]))
@@ -385,7 +489,7 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
                         write_chunk(target, chunk, job_id, lease)
             if "result.json" not in names or not names.intersection({"model.glb", "layout.json"}):
                 raise HTTPException(422, "Missing reconstruction result")
-            if kind == "pet" and "model.glb" not in names:
+            if kind in ("pet", "pet_avatar") and "model.glb" not in names:
                 raise HTTPException(422, "Pet reconstruction requires model.glb")
             metadata = read_json(folder / "result.json", 1024*1024)
             if not isinstance(metadata, dict) or not isinstance(metadata.get("method"), str) or not metadata["method"].strip():
@@ -395,9 +499,12 @@ def create_jobs_router(db_path, viewer, worker_token, media_root):
                 raise HTTPException(422, "Result limitations must be strings")
             method = metadata["method"][:300]
             limitations = [item[:1000] for item in limitations[:20]]
-            if "model.glb" in names: validate_glb(folder / "model.glb")
+            document = validate_glb(folder / "model.glb") if "model.glb" in names else None
+            animations = validate_animated_pet(document) if kind == "pet_avatar" else []
             if "layout.json" in names: validate_layout(folder / "layout.json")
             result = {"method": method, "limitations": limitations}
+            if kind == "pet_avatar":
+                result.update({"rigged": True, "animated": True, "animations": animations})
             for key, name in (("modelUrl", "model.glb"), ("layoutUrl", "layout.json"), ("previewUrl", "preview.png" if "preview.png" in names else "preview.jpg")):
                 if name in names: result[key] = f"{base}/api/jobs/{job_id}/artifacts/{name}"
             with db_open() as db:

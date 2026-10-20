@@ -53,8 +53,10 @@ function Sparkline({ events }: { events: MotionEvent[] }) {
 }
 
 export function CollarPage() {
-  const { live, phase, activity, error, token, now, health, setToken } = useCollar()
+  const { live, phase, activity, error, token, now, health, boundPetId, bindPet, setToken } = useCollar()
   const pet = useStore((s) => s.pet)
+  const pets = useStore((s) => s.pets)
+  const [bindingDraft, setBindingDraft] = useState(pet.id)
   const [tokenInput, setTokenInput] = useState('')
   const [tab, setTab] = useState<'motion' | 'room' | 'avatar'>('motion')
   const [roomState, setRoomState] = useState(() => {
@@ -117,6 +119,7 @@ export function CollarPage() {
   }, [])
 
   const latest = live?.latest
+  useEffect(() => { setBindingDraft(boundPetId && pets.some((item) => item.id === boundPetId) ? boundPetId : pet.id) }, [boundPetId, pet.id, live?.device?.deviceId])
   const age = latest ? Math.max(0, Math.floor((now - latest.receivedAt) / 1000)) : null
   const fresh = phase === 'connected' && live?.online && latest && now - latest.receivedAt >= -60_000 && now - latest.receivedAt <= STALE_MS
   const status = phase === 'locked' ? '尚未连接' : phase === 'connecting' ? '正在连接' : phase === 'error' ? '连接中断' : fresh ? '正在接收' : '设备离线'
@@ -212,9 +215,10 @@ export function CollarPage() {
     return () => { disposed = true; controller?.abort(); clearTimeout(timer) }
   }, [token, modelCacheReady, model, applyGeneratedPet])
 
-  const hasMatchingAnimation = !!matchingClip(modelInfo.clips.map((name) => ({ name })), activity)
+  const petActivity: CollarActivity = boundPetId === pet.id ? activity : 'unknown'
+  const hasMatchingAnimation = !!matchingClip(modelInfo.clips.map((name) => ({ name })), petActivity)
   const sceneModel = avatarStyle === 'chibi' ? chibiModel : model
-  const sceneActivity = avatarStyle === 'chibi' && previewMotion ? previewMotion : activity
+  const sceneActivity = avatarStyle === 'chibi' && previewMotion ? previewMotion : petActivity
   const chibiReady = avatarStyle === 'chibi' && !!chibiModel && modelInfo.loaded && modelInfo.rigged
 
   return <div className="collar-page" data-testid="collar-page">
@@ -229,8 +233,8 @@ export function CollarPage() {
         <PetScene activity={sceneActivity} color={avatar.color} room={roomState.dimensions} model={sceneModel} headScale={avatarStyle === 'chibi' ? 1.22 : 1} viewAzimuth={avatarStyle === 'reconstructed' && /triposr/i.test(modelMethod) ? 2.16 : undefined} clipMap={avatarStyle === 'chibi' ? { rest: 'Idle', walk: 'Walk', run: 'Gallop', shake: '' } : undefined} onModelInfo={modelInfoCallback} />
         <div className="collar-stage-hint" role="status">{avatarStyle === 'reconstructed' && autoModelStatus ? autoModelStatus : '拖动旋转 · 滚轮 / 双指缩放'}</div>
         <div className="collar-character-controls"><div className="collar-character-switch" role="group" aria-label="宠物 3D 形象"><button type="button" className={avatarStyle === 'chibi' ? 'is-active' : ''} onClick={() => { setAvatarStyle('chibi'); setPreviewMotion(null) }}>Q 版 · 骨骼动画</button><button type="button" className={avatarStyle === 'reconstructed' ? 'is-active' : ''} disabled={!model} onClick={() => { setAvatarStyle('reconstructed'); setPreviewMotion(null) }}>照片重建 · 真实外观</button></div>{avatarStyle === 'chibi' && <div className="collar-preview-switch" role="group" aria-label="骨骼动画预览"><span><Play size={12} />动画预览</span>{([{ key: 'rest', label: '待机' }, { key: 'walk', label: '行走' }, { key: 'run', label: '奔跑' }] as const).map(({ key, label }) => <button type="button" key={key} className={previewMotion === key ? 'is-active' : ''} aria-pressed={previewMotion === key} onClick={() => setPreviewMotion(key)}>{label}</button>)}<button type="button" className={!previewMotion ? 'is-active' : ''} aria-pressed={!previewMotion} onClick={() => setPreviewMotion(null)}>跟随项圈</button></div>}</div>
-        <div className="collar-stage-footer"><div className={`collar-activity-icon ${fresh ? 'is-live' : ''}`}><Activity size={25} /></div><div><h3 data-testid="collar-activity">{activityLabels[activity]}</h3><p>{activityDescriptions[activity]}</p></div><div className="collar-confidence"><b>{fresh && latest ? `${Math.round(latest.confidence * 100)}%` : '—'}</b><span>规则分类置信度</span></div></div>
-        <div className="collar-stage-note"><CircleHelp size={13} /><span>{avatarStyle === 'chibi' ? chibiError ? `${chibiError}，显示临时形象。` : previewMotion ? `正在手动预览 ${activityLabels[previewMotion]} 骨骼动作；此动画不代表项圈实时数据。` : activity === 'unknown' ? '项圈离线，角色冻结；点击动画预览可试播骨骼动作。' : `项圈驱动 ${activityLabels[activity]}。待机、行走、奔跑使用模型骨骼动画；抖动为整体反馈。` : model && modelInfo.loaded ? `${modelMethod || '导入模型'} · ${activity === 'unknown' ? '离线冻结。' : hasMatchingAnimation ? '正在播放模型内置动作。' : '整体模型动作反馈，无骨骼步态。'}项圈不提供室内位置。` : roomState.dimensions ? '房间为手动确认结构；宠物在房间中的位置仅为展示。' : '待模型载入，当前为程序模板。项圈只提供动作，不提供室内位置。'}</span></div>
+        <div className="collar-stage-footer"><div className={`collar-activity-icon ${fresh && boundPetId === pet.id ? 'is-live' : ''}`}><Activity size={25} /></div><div><h3 data-testid="collar-activity">{activityLabels[petActivity]}</h3><p>{activityDescriptions[petActivity]}</p></div><div className="collar-confidence"><b>{fresh && boundPetId === pet.id && latest ? `${Math.round(latest.confidence * 100)}%` : '—'}</b><span>规则分类置信度</span></div></div>
+        <div className="collar-stage-note"><CircleHelp size={13} /><span>{!previewMotion && boundPetId !== pet.id ? `请在右侧把设备绑定到 ${pet.name}，模型才会跟随它的真实动作。` : avatarStyle === 'chibi' ? chibiError ? `${chibiError}，显示临时形象。` : previewMotion ? `正在手动预览 ${activityLabels[previewMotion]} 骨骼动作；此动画不代表项圈实时数据。` : petActivity === 'unknown' ? '项圈离线，角色冻结；点击动画预览可试播骨骼动作。' : `项圈驱动 ${activityLabels[petActivity]}。待机、行走、奔跑使用模型骨骼动画；抖动为整体反馈。` : model && modelInfo.loaded ? `${modelMethod || '导入模型'} · ${petActivity === 'unknown' ? '离线冻结。' : hasMatchingAnimation ? '正在播放模型内置动作。' : '整体模型动作反馈，无骨骼步态。'}项圈不提供室内位置。` : roomState.dimensions ? '房间为手动确认结构；宠物在房间中的位置仅为展示。' : '待模型载入，当前为程序模板。项圈只提供动作，不提供室内位置。'}</span></div>
       </section>
 
       <aside className="collar-connect-card">
@@ -245,6 +249,7 @@ export function CollarPage() {
         {error && <div className="collar-message is-error" role="alert">{error}</div>}
         {phase === 'connected' && !fresh && <div className="collar-message"><WifiOff size={15} />云端已连接，等待板子上传新数据。模型已停止动作。</div>}
         <dl className="collar-device-details"><div><dt>设备</dt><dd title={live?.device?.deviceId}>{live?.device?.deviceId || '—'}</dd></div><div><dt>连接方式</dt><dd>{sourceLabel}</dd></div><div><dt>固件版本</dt><dd>{live?.device?.firmware || '—'}</dd></div><div><dt>最新窗口</dt><dd>{latest ? `#${latest.seq} · ${age}s 前` : '—'}</dd></div><div><dt>采样率</dt><dd>{live?.device?.sampleRate ? `${live.device.sampleRate} Hz` : '—'}</dd></div></dl>
+        {live?.device?.deviceId && <div className="mt-3 rounded-xl border border-line bg-white/70 p-3 text-xs"><label className="collar-input-label" htmlFor="collar-pet-binding">这台项圈佩戴在</label><select className="collar-field" id="collar-pet-binding" data-testid="collar-pet-binding" value={bindingDraft} onChange={(event) => setBindingDraft(event.target.value)}>{pets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><div className="collar-connect-buttons"><button className="collar-button is-primary" type="button" data-testid="collar-save-binding" disabled={phase !== 'connected' || !bindingDraft || bindingDraft === boundPetId} onClick={() => bindPet(bindingDraft)}>绑定设备</button>{boundPetId && <button className="collar-button" type="button" onClick={() => bindPet(null)}>解除绑定</button>}</div><p className="mt-2 text-muted">{boundPetId ? `仅 ${pets.find((item) => item.id === boundPetId)?.name || '已绑定宠物'} 会接收这台项圈的动作。` : '尚未绑定宠物；设备数据不会改动演示宠物状态。'}</p></div>}
         <div className="collar-privacy"><LockKeyhole size={12} />令牌只保存在当前浏览器会话，不会写入链接。</div>
         <WifiSetup />
       </aside>

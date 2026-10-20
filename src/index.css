@@ -37,6 +37,18 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* The transparent desktop-pet canvas fills its window without the collar stage's fixed height. */
+.mini-avatar-scene .collar-scene {
+  width: 100%;
+  height: 100%;
+}
+
+html.petlink-widget-mode,
+html.petlink-widget-mode body,
+html.petlink-widget-mode #root {
+  background: transparent !important;
+}
+
 /* 地图上可点击设备：轮廓白色线条闪烁提示 */
 @keyframes clickblink {
   0%, 100% { opacity: 0.25; }

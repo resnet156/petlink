@@ -80,6 +80,9 @@ export function DesktopWidgetModal() {
           <button className="btn" data-testid="desktop-preview" onClick={preview}>
             在新窗口预览浮窗
           </button>
+          <p className="rounded-xl border border-line bg-[#f4f8f5] p-2.5 text-xs leading-relaxed text-muted" data-testid="desktop-avatar-scope">
+            照片或视频生成的专属骨骼模型目前保存在网站浏览器中，只在同一网站的组件视图或网页浮窗（?mini=1）显示。安装版使用独立的 file:// 存储，暂不共享该模型，仍会显示原有宠物形象。
+          </p>
           <p className="text-[11px] leading-relaxed text-muted">
             安装包未经签名。macOS 若提示「已损坏/无法打开」，把 app 拖进「应用程序」后，在「终端」执行一次
             <code className="mx-1 rounded bg-[#eef3ef] px-1">xattr -cr "/Applications/PetLink 桌面组件.app"</code>

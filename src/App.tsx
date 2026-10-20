@@ -31,7 +31,6 @@ import { DesktopWidgetModal } from '@/modals/DesktopWidgetModal'
 import { Icon, type IconName } from '@/components/Icon'
 
 const NAV: { key: PageKey; icon: IconName; label: string }[] = [
-  { key: 'collar', icon: 'devices', label: '真实项圈' },
   { key: 'home', icon: 'home', label: '首页' },
   { key: 'map', icon: 'map', label: '地图' },
   { key: 'records', icon: 'records', label: '记录' },
@@ -88,14 +87,14 @@ export default function App() {
           ))}
         </nav>
         <div className="flex-1 max-[1000px]:hidden" />
-        {page !== 'collar' && <button
+        <button
           className={`grid h-10 w-10 place-items-center rounded-xl border text-[#667773] max-[1000px]:hidden ${demoMode ? 'border-[#e0a53c] bg-[#fff3e0] text-[#a9731f]' : 'border-line bg-white/90'}`}
           data-testid="demo-mode-toggle"
           title={demoMode ? '演示模式已开启（点击退出）' : '开启演示模式'}
           onClick={() => setDemoMode(!demoMode)}
         >
           <Icon name="settings" size={18} />
-        </button>}
+        </button>
       </aside>
 
       {/* 主区域 */}
@@ -103,12 +102,13 @@ export default function App() {
         <div className="sticky top-0 z-10 flex h-16 items-center justify-between bg-gradient-to-b from-[rgba(238,243,239,.98)] to-transparent pb-3.5">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-teal text-white">🐾</div>
-            <div><b className="text-lg">petlink</b><div className="text-xs text-muted">{page === 'collar' ? '真实项圈 · 数字陪伴' : '小度全屋宠物陪伴'}</div></div>
-            {demoMode && page !== 'collar' && (
+            <div><b className="text-lg">petlink</b><div className="text-xs text-muted">小度全屋宠物陪伴</div></div>
+            {demoMode && (
               <span data-testid="demo-mode-badge" className="rounded-full border border-[#e8c98a] bg-[#fff3e0] px-2.5 py-1 text-[11px] font-bold text-[#a9731f]">● 演示模式</span>
             )}
           </div>
-          {page !== 'collar' && <div className="flex gap-2.5">
+          <div className="flex gap-2.5">
+            {page === 'collar' && <button className="btn btn-ghost h-10" onClick={() => goPage('home')}>返回首页</button>}
             <button className="relative grid h-10 w-10 place-items-center rounded-xl border border-line bg-white/90 text-[#667773]" data-testid="account-btn" title={authUser ? `已登录 ${authUser.email}·多设备云同步中` : isCloudEnabled ? '登录 / 云端同步' : '登录 / 云端同步（未配置）'} onClick={() => openModal('auth')}>
               <Icon name={authUser ? 'cloud' : 'login'} size={18} />
               {authUser && (
@@ -125,18 +125,18 @@ export default function App() {
             <button className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-white/90 text-[#667773]" title="地图管理" onClick={() => openModal('mapBuilder')}>
               <Icon name="mapManage" size={18} />
             </button>
-          </div>}
+          </div>
         </div>
 
-        {page === 'collar' ? <CollarPage /> : <div className="collar-demo-banner"><span>产品交互演示：此页的房间位置、电量、其他设备与服务结果为演示数据。真实板子状态请查看「真实项圈」。</span><button onClick={() => goPage('collar')}>返回真实项圈 →</button></div>}
+        {page === 'collar' && <CollarPage />}
         {page === 'home' && <HomePage />}
         {page === 'map' && <MapPage />}
         {page === 'records' && <RecordsPage />}
         {page === 'me' && <MePage />}
       </main>
 
-      {page !== 'collar' && <TrailDrawer />}
-      {page !== 'collar' && <DemoPanel />}
+      <TrailDrawer />
+      <DemoPanel />
       <PwaManager />
       <Toaster />
 

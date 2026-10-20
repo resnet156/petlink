@@ -12,22 +12,30 @@ let localVersion = 0
 
 export async function pullFromCloud(homeId: string): Promise<void> {
   if (!supabase) return
-  const { data, error } = await supabase
-    .from(APP_STATE_TABLE)
-    .select('data, version')
-    .eq('user_id', homeId)
-    .maybeSingle()
-  if (error) {
-    console.warn('[cloudSync] pull failed:', error.message)
-    return
-  }
-  if (data?.data) {
-    applyingRemote = true
-    applySnapshot(data.data)
-    localVersion = data.version ?? 0
-    applyingRemote = false
-  } else {
-    await pushToCloud(homeId)
+  try {
+    const { data, error } = await supabase
+      .from(APP_STATE_TABLE)
+      .select('data, version')
+      .eq('user_id', homeId)
+      .maybeSingle()
+    if (error) {
+      console.warn('[cloudSync] pull failed:', error.message)
+      return
+    }
+    if (data?.data) {
+      applyingRemote = true
+      try {
+        applySnapshot(data.data as Partial<ReturnType<typeof getSnapshot>>)
+        localVersion = data.version ?? 0
+      } finally {
+        applyingRemote = false
+      }
+    } else {
+      await pushToCloud(homeId)
+    }
+  } catch (e) {
+    // 任何异常都吞掉：避免云端数据异常导致登录/同步流程卡死
+    console.warn('[cloudSync] pull error:', e)
   }
 }
 
@@ -68,9 +76,14 @@ export function startCloudSync(homeId: string): void {
         if (!row?.data) return
         if ((row.version ?? 0) <= localVersion) return
         applyingRemote = true
-        applySnapshot(row.data as Partial<ReturnType<typeof getSnapshot>>)
-        localVersion = row.version ?? localVersion
-        applyingRemote = false
+        try {
+          applySnapshot(row.data as Partial<ReturnType<typeof getSnapshot>>)
+          localVersion = row.version ?? localVersion
+        } catch (e) {
+          console.warn('[cloudSync] apply remote error:', e)
+        } finally {
+          applyingRemote = false
+        }
       },
     )
     .subscribe()

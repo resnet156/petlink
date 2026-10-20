@@ -1,6 +1,7 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useStore, currentRoom } from '@/store/useStore'
 import { PetFace } from '@/components/PetFace'
+import { PetAvatarStudio } from '@/components/PetAvatarStudio'
 import { behaviorLabel, behaviorMeta, behaviorColor, behaviorBadge } from '@/lib/tracking'
 import { summarizeDay, buildDiary, eventsForPet, filterByRange } from '@/lib/diary'
 import { blobToDataUrl, downscaleDataUrl } from '@/lib/image'
@@ -25,16 +26,30 @@ export function HomePage() {
   const regenerateDiary = useStore((s) => s.regenerateDiary)
   const toast = useStore((s) => s.toast)
   const photoRef = useRef<HTMLInputElement>(null)
+  const [avatarPhoto, setAvatarPhoto] = useState<{ petId: string; file: File } | null>(null)
 
-  const onPickPhoto = async (file?: File) => {
-    if (!file) return
+  const onPickPhoto = async (file?: File): Promise<boolean> => {
+    if (!file) return false
     try {
       const raw = await blobToDataUrl(file)
-      const small = await downscaleDataUrl(raw, 480, 0.82)
-      setPetPhoto(pet.id, small)
-      toast('success', `已更新${pet.name}的照片`)
+      // 动图（GIF/APNG/WebP）保留原图以保持动画；静态图降采样省空间
+      const animated = /gif|apng/.test(file.type) || (file.type === 'image/webp')
+      if (animated) {
+        if (raw.length > 2_600_000) {
+          toast('warn', '动图过大（建议 <2MB），请压缩后再上传')
+          return false
+        }
+        setPetPhoto(pet.id, raw)
+      } else {
+        const small = await downscaleDataUrl(raw, 480, 0.82)
+        setPetPhoto(pet.id, small)
+      }
+      setAvatarPhoto({ petId: pet.id, file })
+      toast('success', `已更新${pet.name}的形象`)
+      return true
     } catch {
-      toast('error', '照片读取失败，请换一张')
+      toast('error', '图片读取失败，请换一张')
+      return false
     }
   }
 
@@ -60,7 +75,7 @@ export function HomePage() {
 
   return (
     <div>
-      <div className="eyebrow">{week} · {clock}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><div className="eyebrow">{week} · {clock}</div><button className="btn btn-ghost" data-testid="home-open-collar" onClick={() => goPage('collar')}><Icon name="devices" size={15} /> 真实项圈 · 配网与建模</button></div>
       <h1 className="my-1.5 text-3xl font-extrabold tracking-tight">{greeting}，Jin</h1>
       <div className="text-sm text-muted">{pet.name}正在{room?.name ?? '家里'}活动，当前一切正常。</div>
 
@@ -134,7 +149,7 @@ export function HomePage() {
             <button
               className="absolute bottom-[18px] right-[22px] z-[4] grid h-9 w-9 place-items-center rounded-full border border-white/50 bg-[rgba(37,68,62,.5)] text-white backdrop-blur"
               data-testid="home-upload-photo"
-              title="上传真实照片"
+              title="更新宠物头像照片"
               onClick={() => photoRef.current?.click()}
             >
               <Icon name="camera" size={16} />
@@ -177,6 +192,8 @@ export function HomePage() {
             </div>
             <button className="btn btn-primary mt-2.5 w-full" data-testid="home-desktop-widget" onClick={() => openModal('desktopWidget')}>获取 / 使用桌面组件</button>
           </div>
+
+          <PetAvatarStudio key={pet.id} petId={pet.id} petName={pet.name} photoFile={avatarPhoto?.petId === pet.id ? avatarPhoto.file : null} onPhoto={onPickPhoto} />
 
           <div className="card">
             <div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-bold">今天发生了什么</h3><button className="text-xs font-bold text-teal" onClick={() => toggleDrawer(true)}>全部踪迹</button></div>

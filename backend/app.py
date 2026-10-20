@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .classifier import ALGORITHM, classify
 from .jobs import create_jobs_router
 
-VERSION = "0.3.0-collar.1"
+VERSION = "0.1.18-collar.0"
 
 
 class Sample(BaseModel):
@@ -148,13 +148,17 @@ def create_app(db_path=None, viewer_token=None, device_token=None, static_dir=No
 
     @app.get("/api/capabilities", dependencies=[Depends(viewer)])
     def capabilities():
+        fresh = int(time.time()*1000) - 45000
         with connection() as db:
-            worker = db.execute("SELECT * FROM model_worker WHERE id=1").fetchone()
-        available = json.loads(worker["capabilities"]) if worker else []
-        online = bool(worker and int(time.time()*1000)-worker["seen_at"] < 45000)
+            workers = db.execute("SELECT capabilities FROM model_worker_sessions WHERE seen_at >= ?", (fresh,)).fetchall()
+            legacy = db.execute("SELECT capabilities FROM model_worker WHERE id=1 AND seen_at >= ?", (fresh,)).fetchone()
+        if legacy: workers.append(legacy)
+        available = {kind for worker in workers for kind in json.loads(worker["capabilities"])}
+        online = bool(workers)
         return {"telemetry": "hardware", "classification": "experimental-rules",
                 "location": "unavailable", "battery": "unavailable",
                 "petReconstruction": "triposr-single-image" if "pet" in available else "worker-unavailable",
+                "petAvatar": "rigged-animated-worker" if "pet_avatar" in available else "worker-unavailable",
                 "roomReconstruction": "depth-anything-v2-visible-surface" if "room" in available else "worker-unavailable",
                 "workerOnline": online,
                 "floorplan": "manual-dimension-assisted",

@@ -152,6 +152,10 @@ export function Room3D({
           >
             {behaviorBadge[pet.behavior]} {behaviorLabel[pet.behavior]}
           </span>
+          {/* 宠物名字 + 所在房间 */}
+          <span className="absolute left-1/2 top-[80px] flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full border border-white/70 bg-white/90 px-2.5 py-0.5 text-[12px] font-bold shadow-softsm" style={{ color: s.text }}>
+            {pet.name} · {room.name}
+          </span>
         </div>
       </div>
 

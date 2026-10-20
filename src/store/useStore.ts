@@ -247,7 +247,7 @@ export const useStore = create<StoreState>()(
       schemaVersion: SCHEMA_VERSION,
       ...freshDomain(),
 
-      page: 'collar',
+      page: 'home',
       widgetMode: typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mini') === '1',
       mapMode: 'live',
       modal: null,

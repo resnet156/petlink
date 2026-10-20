@@ -5,9 +5,10 @@ import { EditorCanvas } from './EditorCanvas'
 import { InspectorPanel } from './InspectorPanel'
 import { useMapEditor } from './useMapEditor'
 import { seedHomeMap } from '@/domain/seed'
-import { clone } from '@/domain/geometry'
+import { clone, makeId } from '@/domain/geometry'
 import { downscaleDataUrl } from '@/lib/image'
 import { FURNITURE_PALETTE, FURNITURE_META } from '@/components/map/furnitureLib'
+import type { Room } from '@/domain/types'
 
 type Tab = 'upload' | 'draw' | 'scan' | 'bind'
 const MAX_IMG = 8 * 1024 * 1024
@@ -23,10 +24,13 @@ export function MapBuilderModal() {
   const [tab, setTab] = useState<Tab>('draw')
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
   const [bgDataUrl, setBgDataUrl] = useState<string | undefined>(undefined)
+  const [wallOverlay, setWallOverlay] = useState<HTMLImageElement | null>(null)
   const [mapName, setMapName] = useState(homeMap.name)
   const [scanPct, setScanPct] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
+  const rawRef = useRef<string | null>(null)
   const scanTimer = useRef<number | null>(null)
+  const [detecting, setDetecting] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -42,6 +46,7 @@ export function MapBuilderModal() {
       } else {
         setBgImage(null)
       }
+      setWallOverlay(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -53,18 +58,69 @@ export function MapBuilderModal() {
     const reader = new FileReader()
     reader.onload = async () => {
       const raw = reader.result as string
+      rawRef.current = raw
       // 降采样后作为底图，随快照云端同步
       const scaled = await downscaleDataUrl(raw, 1280, 0.72)
       const img = new Image()
       img.onload = () => setBgImage(img)
       img.src = scaled
       setBgDataUrl(scaled)
-      toast('success', '户型图已载入，请在“手绘户型”上逐个校准房间后应用')
-      setTab('draw')
+      setWallOverlay(null)
+      toast('info', '户型图已载入，正在识别墙体…')
+      // 识别用原图(高保真，墙线更完整)，底图仍用降采样图
+      await detectWalls(raw)
     }
     reader.onerror = () => toast('error', '图片读取失败，请重试')
     reader.readAsDataURL(file)
   }
+
+  // 识别墙体 → 生成"墙体参考层"叠在底图上（去除家具/文字），供照着快速框选房间
+  const detectWalls = async (dataUrl?: string) => {
+    const src = dataUrl ?? rawRef.current ?? bgDataUrl
+    if (!src) return toast('warn', '请先上传户型图')
+    setDetecting(true)
+    try {
+      const { detectFloorplan, isMLReady } = await import('@/lib/floorplanML')
+      if (!isMLReady()) toast('info', '首次使用正在下载 AI 识别模型（约 25MB，仅需一次）…')
+      const { overlayUrl, polys } = await detectFloorplan(src)
+      const img = new Image()
+      img.onload = () => setWallOverlay(img)
+      img.src = overlayUrl
+      if (polys.length) {
+        const rooms: Room[] = polys.map((polygon, i) => ({
+          id: makeId('room'),
+          name: `房间${i + 1}`,
+          kind: 'custom',
+          polygon,
+          devices: [],
+          environment: { temperature: 24, humidity: 55, updatedAt: Date.now() },
+        }))
+        editor.load(rooms)
+        toast('success', `已据墙体生成 ${rooms.length} 个房间（绿色为识别墙体）。拖动顶点/边微调、增删或重命名后应用`)
+      } else {
+        editor.load([])
+        toast('info', '已标出墙体（绿色参考层）。请用“拖拽画房间”照着墙线框选（会自动吸附到墙）')
+      }
+      setTab('draw')
+    } catch (e) {
+      // 识别失败不阻断：仍进入手绘，让用户照底图手绘；并按原因给出可操作提示
+      const msg = String((e as Error)?.message || e)
+      const loadFail = /fetch|network|load|protobuf|wasm|onnx|Failed|404|session/i.test(msg)
+      editor.load([])
+      setWallOverlay(null)
+      setTab('draw')
+      toast(
+        'warn',
+        loadFail
+          ? 'AI 墙体识别暂不可用（模型未加载成功，可能网络较慢或缓存旧版本，请刷新后重试）。你仍可照着底图直接拖拽画房间。'
+          : '这张图没能识别出清晰墙体，你可以照着底图直接拖拽画房间。',
+      )
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  // 空间扫描（演示）：进度条动画
 
   const startScan = () => {
     if (scanTimer.current) window.clearInterval(scanTimer.current)
@@ -110,13 +166,19 @@ export function MapBuilderModal() {
 
       {tab === 'upload' && (
         <div>
-          <button onClick={() => fileRef.current?.click()} className="flex min-h-[220px] w-full flex-col items-center justify-center rounded-[22px] border-2 border-dashed border-[#cedbd5] bg-[#f7faf8] p-6 text-center">
+          <button data-testid="upload-floorplan-btn" onClick={() => fileRef.current?.click()} className="flex min-h-[220px] w-full flex-col items-center justify-center rounded-[22px] border-2 border-dashed border-[#cedbd5] bg-[#f7faf8] p-6 text-center">
             <div className="text-4xl">⌗</div>
             <b className="mt-2">上传家庭户型图</b>
             <p className="text-xs text-muted">支持 JPG / PNG（≤8MB）。上传后进入手绘校准房间。</p>
-            {bgImage && <img src={bgImage.src} alt="户型图预览" className="mt-3 max-h-40 rounded-xl" />}
+            {bgImage && <img src={bgImage.src} alt="户型图预览" data-testid="floorplan-preview" className="mt-3 max-h-40 rounded-xl" />}
           </button>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onUpload(e.target.files?.[0])} />
+          <input ref={fileRef} type="file" accept="image/*" data-testid="upload-floorplan-input" className="hidden" onChange={(e) => onUpload(e.target.files?.[0])} />
+          {bgDataUrl && (
+            <button data-testid="auto-detect-rooms" className="btn btn-primary mt-3 w-full" disabled={detecting} onClick={() => detectWalls()}>
+              {detecting ? '识别中…' : '✨ 重新识别墙体参考层'}
+            </button>
+          )}
+          <p className="mt-2 text-[11px] leading-relaxed text-muted">上传后用 AI 识别墙体，叠成绿色“墙体参考层”（已去除家具/文字/标注干扰）。到“手绘户型”照着参考层用“拖拽画房间”快速框选、命名后应用。模型在本机运行，图片不外传。</p>
         </div>
       )}
 
@@ -161,7 +223,12 @@ export function MapBuilderModal() {
                 )}
               </div>
             )}
-            <EditorCanvas editor={editor} bgImage={bgImage} />
+            <EditorCanvas editor={editor} bgImage={bgImage} wallOverlay={wallOverlay} />
+            {wallOverlay && (
+              <p className="mt-2 rounded-xl bg-[#e8f3ee] px-3 py-2 text-[11px] leading-relaxed text-[#2e7f75]">
+                绿色是 AI 识别出的墙体（已去除家具/文字）。已据此生成房间——拖动顶点/边微调即可；若要新增，用“拖拽画房间”框选会自动吸附到墙线。
+              </p>
+            )}
             <div className="mt-2 flex gap-1.5">
               <button className="btn" disabled={editor.polyDraft.length < 3} onClick={() => editor.finishPoly()}>完成当前自由形状</button>
               <button className="btn" onClick={() => editor.setPolyDraft([])}>取消形状</button>

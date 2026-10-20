@@ -6,10 +6,11 @@ import type { useMapEditor } from './useMapEditor'
 
 type Editor = ReturnType<typeof useMapEditor>
 
-export function EditorCanvas({ editor, bgImage }: { editor: Editor; bgImage: HTMLImageElement | null }) {
+export function EditorCanvas({ editor, bgImage, wallOverlay }: { editor: Editor; bgImage: HTMLImageElement | null; wallOverlay?: HTMLImageElement | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drag = useRef<{ action: 'rect' | 'move' | 'vertex' | 'furn' | 'furnresize' | null; start: Point; originPoly?: Point[]; vertex: number; furnIdx?: number; ox?: number; oy?: number }>({ action: null, start: { x: 0, y: 0 }, vertex: -1 })
   const tempRect = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
+  const wallGridRef = useRef<Uint8Array | null>(null)
   const { rooms, selected, tool, polyDraft } = editor
 
   const W = 1000, H = 600
@@ -31,6 +32,13 @@ export function EditorCanvas({ editor, bgImage }: { editor: Editor; bgImage: HTM
       ctx.save()
       ctx.globalAlpha = 0.3
       ctx.drawImage(bgImage, 0, 0, W, H)
+      ctx.restore()
+    }
+    // 墙体参考层（模型识别，已去除家具/文字）——拉伸铺满，与底图对齐
+    if (wallOverlay && wallOverlay.complete && wallOverlay.naturalWidth) {
+      ctx.save()
+      ctx.globalAlpha = 0.55
+      ctx.drawImage(wallOverlay, 0, 0, W, H)
       ctx.restore()
     }
     ctx.strokeStyle = '#e4ebe7'
@@ -88,6 +96,55 @@ export function EditorCanvas({ editor, bgImage }: { editor: Editor; bgImage: HTM
   }
 
   useEffect(draw)
+
+  // 把墙体参考层栅格化到 W×H，供"拖拽画房间"吸附到墙线
+  useEffect(() => {
+    if (!wallOverlay || !wallOverlay.complete || !wallOverlay.naturalWidth) { wallGridRef.current = null; return }
+    const oc = document.createElement('canvas'); oc.width = W; oc.height = H
+    const octx = oc.getContext('2d'); if (!octx) return
+    octx.drawImage(wallOverlay, 0, 0, W, H)
+    const d = octx.getImageData(0, 0, W, H).data
+    const grid = new Uint8Array(W * H)
+    for (let i = 0; i < W * H; i++) grid[i] = d[i * 4 + 3] > 80 ? 1 : 0
+    wallGridRef.current = grid
+  }, [wallOverlay])
+
+  // —— 吸附到墙线 ——
+  const SNAP = 22, COVER = 0.2
+  const wallAt = (x: number, y: number) => {
+    const g = wallGridRef.current
+    if (!g || x < 0 || y < 0 || x >= W || y >= H) return 0
+    return g[(y | 0) * W + (x | 0)]
+  }
+  const snapVert = (xe: number, y0: number, y1: number) => {
+    let best = xe, bestCov = COVER
+    for (let dx = -SNAP; dx <= SNAP; dx++) {
+      const x = xe + dx
+      let hit = 0, n = 0
+      for (let y = y0; y <= y1; y += 2) { n++; if (wallAt(x, y) || wallAt(x - 1, y) || wallAt(x + 1, y)) hit++ }
+      const cov = hit / Math.max(1, n)
+      if (cov > bestCov || (cov === bestCov && Math.abs(dx) < Math.abs(best - xe))) { bestCov = cov; best = x }
+    }
+    return best
+  }
+  const snapHorz = (ye: number, x0: number, x1: number) => {
+    let best = ye, bestCov = COVER
+    for (let dy = -SNAP; dy <= SNAP; dy++) {
+      const y = ye + dy
+      let hit = 0, n = 0
+      for (let x = x0; x <= x1; x += 2) { n++; if (wallAt(x, y) || wallAt(x, y - 1) || wallAt(x, y + 1)) hit++ }
+      const cov = hit / Math.max(1, n)
+      if (cov > bestCov || (cov === bestCov && Math.abs(dy) < Math.abs(best - ye))) { bestCov = cov; best = y }
+    }
+    return best
+  }
+  const snapRect = (x: number, y: number, w: number, h: number) => {
+    if (!wallGridRef.current) return { x, y, w, h }
+    let x0 = x, x1 = x + w, y0 = y, y1 = y + h
+    x0 = snapVert(x0, y0, y1); x1 = snapVert(x1, y0, y1)
+    y0 = snapHorz(y0, x0, x1); y1 = snapHorz(y1, x0, x1)
+    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) }
+  }
 
   const onDown = (e: React.PointerEvent) => {
     canvasRef.current?.setPointerCapture(e.pointerId)
@@ -154,7 +211,9 @@ export function EditorCanvas({ editor, bgImage }: { editor: Editor; bgImage: HTM
       return
     }
     if (drag.current.action === 'rect') {
-      tempRect.current = { x: Math.min(drag.current.start.x, p.x), y: Math.min(drag.current.start.y, p.y), w: Math.abs(p.x - drag.current.start.x), h: Math.abs(p.y - drag.current.start.y) }
+      const rx = Math.min(drag.current.start.x, p.x), ry = Math.min(drag.current.start.y, p.y)
+      const rw = Math.abs(p.x - drag.current.start.x), rh = Math.abs(p.y - drag.current.start.y)
+      tempRect.current = rw > 8 && rh > 8 ? snapRect(rx, ry, rw, rh) : { x: rx, y: ry, w: rw, h: rh }
       draw()
       return
     }
@@ -172,9 +231,10 @@ export function EditorCanvas({ editor, bgImage }: { editor: Editor; bgImage: HTM
   const onUp = (e: React.PointerEvent) => {
     if (drag.current.action === 'rect') {
       const p = toCanvas(e)
-      const x = Math.min(drag.current.start.x, p.x), y = Math.min(drag.current.start.y, p.y)
-      const w = Math.abs(p.x - drag.current.start.x), h = Math.abs(p.y - drag.current.start.y)
-      if (w > 65 && h > 55) editor.addRect(x, y, w, h)
+      const rx = Math.min(drag.current.start.x, p.x), ry = Math.min(drag.current.start.y, p.y)
+      const rw = Math.abs(p.x - drag.current.start.x), rh = Math.abs(p.y - drag.current.start.y)
+      const s = rw > 8 && rh > 8 ? snapRect(rx, ry, rw, rh) : { x: rx, y: ry, w: rw, h: rh }
+      if (s.w > 65 && s.h > 55) editor.addRect(s.x, s.y, s.w, s.h)
     }
     tempRect.current = null
     drag.current = { action: null, start: { x: 0, y: 0 }, vertex: -1 }

@@ -12,6 +12,8 @@ describe('reconstruction upload boundaries', () => {
     expect(() => validateMedia([video()], 'room', 'video')).not.toThrow()
     expect(() => validateMedia([video(), video()], 'room', 'video')).toThrow(/一个视频/)
     expect(() => validateMedia([image(), image()], 'pet', 'image')).toThrow(/一张/)
+    expect(() => validateMedia([image()], 'pet_avatar', 'image')).not.toThrow()
+    expect(() => validateMedia([image(), image()], 'pet_avatar', 'image')).toThrow(/一张/)
   })
   it('rejects mismatched media and per-file or total size overflow before upload', () => {
     expect(() => validateMedia([video()], 'pet', 'image')).toThrow()
@@ -42,5 +44,17 @@ describe('server generated evidence', () => {
     expect(response.jobs[0].status).toBe('queued')
     expect(response.worker?.online).toBe(false)
     expect(() => parseJobs({ jobs: [{ id: 'two', kind: 'pet', status: 'magic-ready', stage: '' }] })).toThrow()
+  })
+  it('keeps the generated avatar tied to its pet and does not infer rigging from an old static result', () => {
+    const base = { status: 'succeeded', stage: 'Done', createdAt: 1000, updatedAt: 1001 }
+    const { jobs } = parseJobs({ jobs: [
+      { ...base, id: 'avatar', kind: 'pet_avatar', petId: 'pet-dog', result: { modelUrl: '/petlink/api/jobs/avatar/artifacts/model.glb', method: 'rigged', rigged: true, animated: true, animations: ['Idle', 'Walk'] } },
+      { ...base, id: 'old', kind: 'pet', result: { modelUrl: '/petlink/api/jobs/old/artifacts/model.glb', method: 'TripoSR' } },
+    ] })
+    expect(jobs[0].petId).toBe('pet-dog')
+    expect(jobs[0].result?.rigged).toBe(true)
+    expect(jobs[0].result?.animations).toEqual(['Idle', 'Walk'])
+    expect(jobs[1].result?.rigged).toBe(false)
+    expect(jobs[1].result?.animated).toBe(false)
   })
 })

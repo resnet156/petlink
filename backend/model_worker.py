@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 import httpx
 
@@ -21,9 +22,14 @@ def main():
     token = os.environ["PETLINK_WORKER_TOKEN"]
     engine_python = os.environ["PETLINK_ENGINE_PYTHON"]
     engine_script = os.environ["PETLINK_ENGINE_SCRIPT"]
+    avatar_script = os.environ.get("PETLINK_AVATAR_ENGINE_SCRIPT", "").strip()
+    avatar_python = os.environ.get("PETLINK_AVATAR_ENGINE_PYTHON", engine_python)
     work = Path(os.environ["PETLINK_WORKER_DATA"]).resolve()
     work.mkdir(parents=True, exist_ok=True, mode=0o700)
-    capabilities = os.environ.get("PETLINK_MODEL_CAPABILITIES", "pet,room").split(",")
+    capabilities = [item.strip() for item in os.environ.get("PETLINK_MODEL_CAPABILITIES", "pet,room").split(",") if item.strip()]
+    if "pet_avatar" in capabilities and (not avatar_script or not Path(avatar_script).is_file()):
+        raise SystemExit("pet_avatar capability requires PETLINK_AVATAR_ENGINE_SCRIPT")
+    worker_id = uuid.uuid4().hex
     client = httpx.Client(headers={"Authorization": "Bearer " + token}, timeout=60, follow_redirects=False)
 
     def post(path, data=None, **kwargs):
@@ -45,8 +51,8 @@ def main():
     while True:
         process, job = None, None
         try:
-            post("/worker/heartbeat", {"capabilities": capabilities})
-            job = post("/worker/claim")["job"]
+            post("/worker/heartbeat", {"workerId": worker_id, "capabilities": capabilities})
+            job = post("/worker/claim", {"workerId": worker_id})["job"]
             if not job:
                 time.sleep(4)
                 continue
@@ -75,7 +81,7 @@ def main():
                                 state = state_response.json()
                                 if state["status"] != "running" or state["lease"] != job["lease"]:
                                     raise RuntimeError("Job cancelled or superseded during download")
-                                post("/worker/heartbeat", {"capabilities": capabilities})
+                                post("/worker/heartbeat", {"workerId": worker_id, "capabilities": capabilities})
                                 progress(job, "正在下载原始素材")
                                 download_heartbeat = time.monotonic()
                             size += len(chunk)
@@ -83,11 +89,13 @@ def main():
                             output.write(chunk)
                 inputs.append(target)
             output = folder / "result"
-            stage = "TripoSR 正在重建宠物网格" if job["kind"] == "pet" else "Depth Anything 正在估计可见室内深度"
+            stage = {"pet": "TripoSR 正在重建宠物网格", "pet_avatar": "正在生成有骨骼的 Q 版宠物", "room": "Depth Anything 正在估计可见室内深度"}[job["kind"]]
             progress(job, stage)
             started, heartbeat_at = time.monotonic(), 0
             with (folder / "inference.log").open("wb") as log:
-                process = subprocess.Popen([engine_python, engine_script, "--kind", job["kind"], "--input", str(inputs[0]), "--output", str(output)],
+                script = avatar_script if job["kind"] == "pet_avatar" else engine_script
+                python = avatar_python if job["kind"] == "pet_avatar" else engine_python
+                process = subprocess.Popen([python, script, "--kind", job["kind"], "--input", str(inputs[0]), "--output", str(output)],
                                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                                            env={**os.environ, "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"})
                 cancelled = False
@@ -101,7 +109,7 @@ def main():
                         state = response.json()
                         if state["status"] != "running" or state["lease"] != job["lease"]:
                             stop(process); cancelled = True; break
-                        post("/worker/heartbeat", {"capabilities": capabilities})
+                        post("/worker/heartbeat", {"workerId": worker_id, "capabilities": capabilities})
                         progress(job, stage)
                         heartbeat_at = time.monotonic()
                     time.sleep(1)
