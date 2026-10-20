@@ -6,6 +6,7 @@ import type {
   Device,
   DeviceType,
   Fence,
+  FindOwnerState,
   HandoffState,
   HomeMap,
   LostMode,
@@ -17,7 +18,7 @@ import type {
   TransitionRoute,
   VoicePreset,
 } from '@/domain/types'
-import { fitFenceRect, makeId, nearestRoomIdWith, roomCentroid } from '@/domain/geometry'
+import { buildWalkPath, fitFenceRect, makeId, nearestRoomIdWith, roomCentroid } from '@/domain/geometry'
 import {
   SCHEMA_VERSION,
   seedChat,
@@ -28,11 +29,10 @@ import {
   seedRules,
 } from '@/domain/seed'
 import { camerasOf, roomHasDevice } from '@/lib/tracking'
-import { generateDiaryText } from '@/lib/diary'
 import { mockHardwareAdapter } from '@/adapters/mock'
 import { timeHM } from '@/lib/time'
 
-export type PageKey = 'home' | 'map' | 'records' | 'me'
+export type PageKey = 'collar' | 'home' | 'map' | 'records' | 'me'
 export type MapMode = 'live' | 'history' | 'devices'
 export type ModalKey =
   | 'mapBuilder'
@@ -52,6 +52,7 @@ export type ModalKey =
   | 'deviceControl'
   | 'shareCard'
   | 'liveLocate'
+  | 'desktopWidget'
   | 'auth'
   | null
 
@@ -74,12 +75,17 @@ export type StoreState = {
   chat: ChatMessage[]
   voice: VoicePreset | null
   lost: LostMode
+  findOwner: FindOwnerState
   companionEnabled: boolean
   moodSignal: boolean
-  diaryText: string
+  diarySeed: number
+  /** 演示模式：开启后才在正式界面显示模拟按钮/演示控制台（持久化） */
+  demoMode: boolean
 
   // ---- UI / 瞬态（不持久化） ----
   page: PageKey
+  /** 桌面组件/浮窗视图开关（与完整应用共享同一 store，可运行时切换、天然同步位置） */
+  widgetMode: boolean
   mapMode: MapMode
   modal: ModalKey
   drawerOpen: boolean
@@ -87,20 +93,28 @@ export type StoreState = {
   toasts: Toast[]
   handoff: HandoffState
   transitionRoute: TransitionRoute
+  walkIndex: number
   activeCameraId: string | null
+  /** 地图上的摄像头观看浮窗是否打开（复用：双击摄像头图标 / 宠物气泡“看看它”都走这里） */
+  cameraFloatOpen: boolean
   selectedEvent: PetEvent | null
   deviceControlTarget: DeviceControlTarget
+  /** 当前设备操作的执行状态（统一反馈：发送中/成功/失败/离线） */
+  deviceOp: { deviceId: string; phase: 'sending' | 'success' | 'failed' | 'offline'; message: string } | null
   editingRuleId: string | null
 
   // ---- actions ----
   toast: (kind: ToastKind, text: string) => void
   dismissToast: (id: string) => void
   goPage: (page: PageKey) => void
+  setWidgetMode: (v: boolean) => void
+  toggleWidgetMode: () => void
   setMapMode: (mode: MapMode) => void
   openModal: (m: Exclude<ModalKey, null>) => void
   closeModal: () => void
   toggleDrawer: (v?: boolean) => void
   toggleDemo: (v?: boolean) => void
+  setDemoMode: (v: boolean) => void
 
   applyHomeMap: (rooms: Room[], name?: string, backgroundImage?: string) => void
   moveToRoom: (roomId: string) => void
@@ -111,10 +125,14 @@ export type StoreState = {
   addPet: (name: string) => void
   removePet: (id: string) => void
   renamePet: (id: string, name: string) => void
+  setPetPhoto: (id: string, photo: string | undefined) => void
   setRoomEnvironment: (roomId: string, temperature: number, humidity: number) => void
   resolveCameraId: (roomId: string) => string | null
   setActiveCamera: (deviceId: string) => void
   openCamera: (video?: boolean) => void
+  /** 打开摄像头浮窗：传 cameraId 看指定摄像头；不传则看离当前宠物最近的摄像头 */
+  openCameraFloat: (cameraId?: string, video?: boolean) => void
+  closeCameraFloat: () => void
 
   addDevice: (d: Omit<Device, 'id'>) => string
   updateDevice: (id: string, patch: Partial<Device>) => void
@@ -122,6 +140,11 @@ export type StoreState = {
   bindDeviceToRoom: (deviceId: string, roomId: string) => void
   sendCommand: (deviceId: string, command: string, payload?: unknown) => Promise<void>
   turnOnAC: (roomId?: string) => Promise<void>
+  /** 统一设备操作：待机→发送中→执行成功/失败/离线，并落事件 */
+  execDevice: (deviceId: string, command: string, opts?: { apply?: () => void; eventType?: PetEvent['type']; eventDetail?: string }) => Promise<void>
+  /** 远程投喂（先确认克数再执行），成功后生成进食/投喂事件 */
+  feed: (deviceId: string, grams: number) => Promise<void>
+  clearDeviceOp: () => void
 
   addEvent: (e: Omit<PetEvent, 'id' | 'timestamp'> & { timestamp?: number }) => void
   openEvent: (e: PetEvent) => void
@@ -139,6 +162,7 @@ export type StoreState = {
 
   sendChat: (text: string, kind?: ChatMessage['kind']) => void
   triggerBell: () => void
+  clearFindOwner: () => void
 
   saveVoicePreset: (preset: VoicePreset) => void
 
@@ -170,9 +194,10 @@ function freshDomain() {
     chat: seedChat(),
     voice: null as VoicePreset | null,
     lost: { active: false } as LostMode,
+    findOwner: { active: false, step: 0, deviceName: '', roomName: '', petName: '' } as FindOwnerState,
     companionEnabled: false,
     moodSignal: false,
-    diaryText: generateDiaryText(false, 1000),
+    diarySeed: 1,
   }
 }
 
@@ -193,23 +218,51 @@ function clearHandoffTimers() {
   handoffTimers = []
 }
 
+/** 两套房间的整体外接框是否发生较大变化（用于判断自定义围栏是否需复核） */
+function roomsBoundsChanged(a: Room[], b: Room[], threshold = 60): boolean {
+  if (a.length !== b.length) return true
+  const box = (rooms: Room[]) => {
+    const pts = rooms.flatMap((r) => r.polygon)
+    if (!pts.length) return { x1: 0, y1: 0, x2: 0, y2: 0 }
+    return {
+      x1: Math.min(...pts.map((p) => p.x)),
+      y1: Math.min(...pts.map((p) => p.y)),
+      x2: Math.max(...pts.map((p) => p.x)),
+      y2: Math.max(...pts.map((p) => p.y)),
+    }
+  }
+  const A = box(a)
+  const B = box(b)
+  return (
+    Math.abs(A.x1 - B.x1) > threshold ||
+    Math.abs(A.y1 - B.y1) > threshold ||
+    Math.abs(A.x2 - B.x2) > threshold ||
+    Math.abs(A.y2 - B.y2) > threshold
+  )
+}
+
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
       schemaVersion: SCHEMA_VERSION,
       ...freshDomain(),
 
-      page: 'home',
+      page: 'collar',
+      widgetMode: typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mini') === '1',
       mapMode: 'live',
       modal: null,
       drawerOpen: false,
       demoOpen: false,
+      demoMode: false,
       toasts: [],
       handoff: { phase: 'idle', message: '' },
       transitionRoute: null,
+      walkIndex: 0,
       activeCameraId: 'dev_cam_living',
+      cameraFloatOpen: false,
       selectedEvent: null,
       deviceControlTarget: null,
+      deviceOp: null,
       editingRuleId: null,
 
       toast: (kind, text) => {
@@ -219,11 +272,14 @@ export const useStore = create<StoreState>()(
       },
       dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
       goPage: (page) => set({ page }),
+      setWidgetMode: (v) => set({ widgetMode: v }),
+      toggleWidgetMode: () => set((s) => ({ widgetMode: !s.widgetMode })),
       setMapMode: (mode) => set({ mapMode: mode }),
       openModal: (m) => set({ modal: m }),
       closeModal: () => set({ modal: null }),
       toggleDrawer: (v) => set((s) => ({ drawerOpen: typeof v === 'boolean' ? v : !s.drawerOpen })),
       toggleDemo: (v) => set((s) => ({ demoOpen: typeof v === 'boolean' ? v : !s.demoOpen })),
+      setDemoMode: (v) => set({ demoMode: v, demoOpen: v }),
 
       resolveCameraId: (roomId) => {
         const { devices, homeMap } = get()
@@ -257,7 +313,18 @@ export const useStore = create<StoreState>()(
     const fallbackRoom = rooms2[0]?.id
     const pets = s.pets.map((p) => (roomIds.has(p.roomId) ? p : { ...p, roomId: fallbackRoom ?? p.roomId }))
     const activePet = pets.find((p) => p.id === s.activePetId) ?? pets[0]
-    const fence: Fence = { points: fitFenceRect(rooms2), mapVersion: version, enabled: s.fence.enabled }
+    // 围栏：用户自定义过的不被静默覆盖；仅在户型大改时标记需复核，否则沿用
+    const prevFence = s.fence
+    let fence: Fence
+    let fenceWarn = false
+    if (prevFence.custom && prevFence.points.length >= 3) {
+      const major = roomsBoundsChanged(s.homeMap.rooms, rooms2)
+      fence = { ...prevFence, needsReview: major }
+      fenceWarn = major
+    } else {
+      // 非自定义围栏才自动贴合新户型
+      fence = { points: fitFenceRect(rooms2), mapVersion: version, enabled: prevFence.enabled, custom: false, needsReview: false }
+    }
     set({
       homeMap,
       devices,
@@ -266,7 +333,8 @@ export const useStore = create<StoreState>()(
       fence,
       activeCameraId: get().resolveCameraId(activePet.roomId),
     })
-    get().toast('success', `户型已应用：${rooms2.length} 个房间 · 追踪/摄像头/围栏已同步 (V${version})`)
+    get().toast('success', `户型已应用：${rooms2.length} 个房间 · 追踪/摄像头已同步 (V${version})`)
+    if (fenceWarn) get().toast('warn', '地图已更新，请到安全区域检查围栏是否仍然适用')
   },
 
   setActiveCamera: (deviceId) => set({ activeCameraId: deviceId }),
@@ -276,6 +344,14 @@ export const useStore = create<StoreState>()(
     set({ activeCameraId: id, modal: 'camera' })
     if (video) window.setTimeout(() => get().toast('info', '已向最近智能屏发送视频互动邀请'), 400)
   },
+
+  openCameraFloat: (cameraId, video) => {
+    const id = cameraId ?? get().resolveCameraId(get().pet.roomId)
+    set({ activeCameraId: id, cameraFloatOpen: true })
+    if (video) window.setTimeout(() => get().toast('info', '已向最近智能屏发送视频互动邀请'), 400)
+  },
+
+  closeCameraFloat: () => set({ cameraFloatOpen: false }),
 
   setActivePet: (id) =>
     set((s) => {
@@ -322,6 +398,13 @@ export const useStore = create<StoreState>()(
       return { pets, pet }
     }),
 
+  setPetPhoto: (id, photo) =>
+    set((s) => {
+      const pets = s.pets.map((p) => (p.id === id ? { ...p, photo } : p))
+      const pet = pets.find((p) => p.id === s.activePetId) ?? pets[0]
+      return { pets, pet }
+    }),
+
   setBehavior: (b) => {
     set((s) => patchActive(s, (p) => ({ ...p, behavior: b, lastUpdatedAt: Date.now() })))
   },
@@ -329,7 +412,8 @@ export const useStore = create<StoreState>()(
   refreshTracking: () => {
     const s = get()
     const hasCam = roomHasDevice(s.devices, s.pet.roomId, 'camera')
-    const confidence = 0.94 + Math.floor(s.pet.lastUpdatedAt % 5) / 100
+    // 置信度按定位来源取稳定值（视觉优于纯项圈信号），不随刷新随机抖动
+    const confidence = hasCam ? 0.97 : 0.9
     set(
       patchActive(s, (p) => ({
         ...p,
@@ -339,7 +423,7 @@ export const useStore = create<StoreState>()(
       })),
     )
     const room = s.homeMap.rooms.find((r) => r.id === s.pet.roomId)
-    get().toast('success', `定位已刷新：${room?.name ?? ''} · 置信度 ${Math.round(confidence * 100)}%`)
+    get().toast('success', `定位已刷新：${room?.name ?? ''} · ${hasCam ? '视觉 + 项圈 · 视觉已确认' : '项圈信号 · 辅助定位中'}`)
   },
 
       setRoomEnvironment: (roomId, temperature, humidity) => {
@@ -404,16 +488,16 @@ export const useStore = create<StoreState>()(
       toggleRule: (id) =>
         set((s) => ({ rules: s.rules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)) })),
 
-      setFencePoints: (pts) => set((s) => ({ fence: { ...s.fence, points: pts } })),
+      setFencePoints: (pts) => set((s) => ({ fence: { ...s.fence, points: pts, custom: true, needsReview: false } })),
       fitFence: () =>
-        set((s) => ({ fence: { ...s.fence, points: fitFenceRect(s.homeMap.rooms), mapVersion: s.homeMap.version } })),
+        set((s) => ({ fence: { ...s.fence, points: fitFenceRect(s.homeMap.rooms), mapVersion: s.homeMap.version, custom: false, needsReview: false } })),
       saveFence: () => {
         const s = get()
         if (s.fence.points.length < 3) {
           s.toast('error', '至少需要 3 个点才能形成围栏')
           return false
         }
-        set({ fence: { ...s.fence, enabled: true, mapVersion: s.homeMap.version } })
+        set({ fence: { ...s.fence, enabled: true, custom: true, needsReview: false, mapVersion: s.homeMap.version } })
         s.toast('success', `虚拟栅栏已保存 · 与当前 V${s.homeMap.version} 家庭地图同步`)
         return true
       },
@@ -422,7 +506,7 @@ export const useStore = create<StoreState>()(
         set({ companionEnabled: v })
         get().toast('info', v ? '已开启情绪陪伴：仅生成温和陪伴提醒，不作健康判断' : '已关闭情绪陪伴')
       },
-      regenerateDiary: () => set((s) => ({ diaryText: generateDiaryText(s.moodSignal, Date.now()) })),
+      regenerateDiary: () => set((s) => ({ diarySeed: s.diarySeed + 1 })),
 
       setLost: (active) => {
         const s = get()
@@ -431,7 +515,8 @@ export const useStore = create<StoreState>()(
         })
         s.toast(active ? 'warn' : 'info', active ? '走失模式已开启，位置将持续广播' : '走失模式已关闭')
       },
-      setDeviceControlTarget: (t) => set({ deviceControlTarget: t, modal: t ? 'deviceControl' : get().modal }),
+      setDeviceControlTarget: (t) => set({ deviceControlTarget: t, deviceOp: null, modal: t ? 'deviceControl' : get().modal }),
+      clearDeviceOp: () => set({ deviceOp: null }),
 
       resetDemo: () => {
         clearHandoffTimers()
@@ -440,10 +525,14 @@ export const useStore = create<StoreState>()(
           ...freshDomain(),
           handoff: { phase: 'idle', message: '' },
           transitionRoute: null,
+          walkIndex: 0,
           activeCameraId: 'dev_cam_living',
           modal: null,
+          cameraFloatOpen: false,
           selectedEvent: null,
           deviceControlTarget: null,
+          deviceOp: null,
+          findOwner: { active: false, step: 0, deviceName: '', roomName: '', petName: '' },
         })
         get().toast('success', '已恢复演示数据')
       },
@@ -453,8 +542,11 @@ export const useStore = create<StoreState>()(
       simulateNextRoom: () => {},
       sendCommand: async () => {},
       turnOnAC: async () => {},
+      execDevice: async () => {},
+      feed: async () => {},
       sendChat: () => {},
       triggerBell: () => {},
+      clearFindOwner: () => {},
       triggerLowMood: () => {},
       triggerFenceAlert: () => {},
       saveVoicePreset: () => {},
@@ -478,7 +570,8 @@ export const useStore = create<StoreState>()(
         lost: s.lost,
         companionEnabled: s.companionEnabled,
         moodSignal: s.moodSignal,
-        diaryText: s.diaryText,
+        diarySeed: s.diarySeed,
+        demoMode: s.demoMode,
       }),
       migrate: (persisted: any, version) => {
         // schema 版本不一致时丢弃旧数据，回到 seed，避免结构错乱
@@ -491,6 +584,13 @@ export const useStore = create<StoreState>()(
 
 // 复杂时序动作（跨房间 / 接力 / 硬件指令 / 对话 / 铃铛 / 情绪 / 围栏告警）
 initComplexActions()
+
+// 同源多窗口（完整应用 ↔ 浏览器浮窗）实时同步：另一窗口写入持久化后，本窗口重新水合
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'petlink-store') void useStore.persist.rehydrate()
+  })
+}
 
 function initComplexActions() {
   const set = (patch: Partial<StoreState> | ((s: StoreState) => Partial<StoreState>)) =>
@@ -510,19 +610,25 @@ function initComplexActions() {
       clearHandoffTimers()
       const fromName = from?.name ?? '出发房间'
       const petName = s.pet.name
-      // 1) 过渡路径 + 奔跑（作用于当前选中宠物）
+      const walkPath = buildWalkPath(from, to)
+      // 1) 过渡路径（沿真实门口折线）+ 奔跑（作用于当前选中宠物）
       set({
         transitionRoute: from
-          ? { from: roomCentroid(from), to: roomCentroid(to), fromRoomId: from.id, toRoomId: to.id }
+          ? { from: roomCentroid(from), to: roomCentroid(to), fromRoomId: from.id, toRoomId: to.id, petId: s.activePetId, path: walkPath }
           : null,
+        walkIndex: 0,
         ...patchActive(s, (p) => ({ ...p, roomId, behavior: 'running', confidence: 0.9, trackingSources: ['ble', 'imu'], lastUpdatedAt: Date.now() })),
         handoff: { phase: 'lost', message: `${fromName}摄像头已失去目标`, fromRoomId: from?.id, toRoomId: to.id, startedAt: Date.now() },
       })
+      // 沿折线逐段行走
+      for (let i = 1; i < walkPath.length; i++) {
+        handoffTimers.push(window.setTimeout(() => set({ walkIndex: i }), 420 * i))
+      }
       // 2) room_change 事件
       s.addEvent({
         type: 'room_change',
         title: `${petName}：${fromName} → ${to.name}`,
-        detail: '跨房间追踪中 · BLE/IMU 保持连续定位',
+        detail: '跨房间追踪中 · 项圈信号保持连续定位',
         petId: s.activePetId,
         fromRoomId: from?.id,
         toRoomId: to.id,
@@ -533,7 +639,7 @@ function initComplexActions() {
 
       // 3) 接力时序
       handoffTimers.push(
-        window.setTimeout(() => set({ handoff: { phase: 'transit', message: '项圈 BLE / IMU 正在保持连续定位', fromRoomId: from?.id, toRoomId: to.id } }), 500),
+        window.setTimeout(() => set({ handoff: { phase: 'transit', message: '项圈信号正在保持连续定位', fromRoomId: from?.id, toRoomId: to.id } }), 500),
       )
       handoffTimers.push(
         window.setTimeout(() => set({ handoff: { phase: 'searching', message: `正在寻找${to.name}房间摄像头…`, fromRoomId: from?.id, toRoomId: to.id } }), 950),
@@ -552,7 +658,7 @@ function initComplexActions() {
             st.toast('success', `摄像头接力完成：${fromName} → ${to.name}`)
           } else {
             set({
-              handoff: { phase: 'no_camera', message: `${to.name}暂无直接摄像头，BLE/IMU 继续追踪；保留最近摄像头画面`, fromRoomId: from?.id, toRoomId: to.id, activeCameraDeviceId: camId ?? undefined },
+              handoff: { phase: 'no_camera', message: `${to.name}暂无直接摄像头，项圈信号继续追踪；保留最近摄像头画面`, fromRoomId: from?.id, toRoomId: to.id, activeCameraDeviceId: camId ?? undefined },
               ...patchActive(st, (p) => ({ ...p, confidence: 0.93, trackingSources: ['ble', 'imu'], lastUpdatedAt: Date.now() })),
               activeCameraId: camId,
             })
@@ -596,6 +702,53 @@ function initComplexActions() {
       }
       s.toast('success', `指令已发送：${command}${dev ? ` · ${dev.name}` : ''}`)
       s.addEvent({ type: 'device_command', title: command, detail: `${dev?.name ?? '设备'} · 指令已发送（未必执行成功）`, roomId: dev?.roomId, deviceId })
+    },
+
+    execDevice: async (deviceId, command, opts) => {
+      const s = get()
+      const dev = s.devices.find((d) => d.id === deviceId)
+      if (!dev) return
+      if (!dev.online) {
+        set({ deviceOp: { deviceId, phase: 'offline', message: `${dev.name}当前离线，指令未发送` } })
+        s.toast('error', `${dev.name}离线，无法执行`)
+        return
+      }
+      set({ deviceOp: { deviceId, phase: 'sending', message: `${command} · 发送中…` } })
+      const res = await mockHardwareAdapter.sendCommand(deviceId, command)
+      if (!res.accepted) {
+        set({ deviceOp: { deviceId, phase: 'failed', message: res.message } })
+        get().addEvent({ type: 'device_command', title: command, detail: `${dev.name} · 执行失败：${res.message}（模拟）`, roomId: dev.roomId, deviceId })
+        get().toast('error', `执行失败：${res.message}`)
+        return
+      }
+      // 已受理 → 模拟设备执行耗时后返回“执行成功”（Demo 模拟反馈）
+      await new Promise((r) => window.setTimeout(r, 650))
+      opts?.apply?.()
+      set({ deviceOp: { deviceId, phase: 'success', message: `${command} · 执行成功（模拟）` } })
+      get().addEvent({
+        type: opts?.eventType ?? 'device_command',
+        title: command,
+        detail: opts?.eventDetail ?? `${dev.name} · 执行成功（模拟反馈）`,
+        petId: get().activePetId,
+        roomId: dev.roomId,
+        deviceId,
+      })
+      get().toast('success', `${dev.name}：${command} 执行成功（模拟）`)
+    },
+
+    feed: async (deviceId, grams) => {
+      const s = get()
+      const dev = s.devices.find((d) => d.id === deviceId)
+      if (!dev) return
+      await get().execDevice(deviceId, `远程投喂 ${grams}g`, {
+        eventType: 'eat',
+        eventDetail: `${dev.name} · 远程投喂 ${grams}g 执行成功（模拟反馈）`,
+        apply: () => {
+          const cur = get().devices.find((d) => d.id === deviceId)
+          const food = Math.max(0, Number(cur?.status.food ?? 68) - Math.round(grams / 2))
+          get().updateDevice(deviceId, { status: { ...cur?.status, food, lastPortion: grams } })
+        },
+      })
     },
 
     turnOnAC: async (roomId?: string) => {
@@ -642,24 +795,58 @@ function initComplexActions() {
     },
 
     triggerBell: () => {
+      clearHandoffTimers()
       const s = get()
       const room = s.homeMap.rooms.find((r) => r.id === s.pet.roomId)
+      const roomName = room?.name ?? '当前房间'
       const name = s.pet.name
+      // 就近选择可播报设备：优先智能屏，其次音箱
+      const roomDevs = s.devices.filter((d) => d.roomId === s.pet.roomId && d.online)
+      const announcer =
+        roomDevs.find((d) => d.type === 'smart_screen') ??
+        roomDevs.find((d) => d.type === 'speaker') ??
+        s.devices.find((d) => d.type === 'smart_screen' || d.type === 'speaker')
+      const deviceName = announcer?.name ?? '最近的小度设备'
+
       const bellMsg: ChatMessage = {
         id: makeId('msg'),
         role: 'pet_event',
         kind: 'bell',
-        text: `${name}拨动了「找主人铃铛」，${room?.name ?? '当前房间'}摄像头确认${name}停留在铃铛旁。`,
+        text: `${name}拨动了「找主人铃铛」，${roomName}摄像头确认${name}停留在铃铛旁。`,
         timestamp: Date.now(),
       }
-      set({ chat: [...s.chat, bellMsg], modal: 'chat' })
-      s.addEvent({ type: 'bell', title: `${name}拨动找人铃铛`, detail: `${room?.name ?? '当前房间'}摄像头确认事件`, petId: s.activePetId, roomId: s.pet.roomId, source: ['camera'] })
+      // 第 1 步：宠物拨铃，摄像头确认
+      set({
+        chat: [...s.chat, bellMsg],
+        modal: 'chat',
+        findOwner: { active: true, step: 1, deviceName, roomName, petName: name, startedAt: Date.now() },
+      })
+      s.addEvent({ type: 'bell', title: `${name}拨动找人铃铛`, detail: `${roomName}摄像头确认事件`, petId: s.activePetId, roomId: s.pet.roomId, source: ['camera'] })
       s.toast('warn', `${name}正在找你 · 已进入宠物对话框`)
+
+      // 第 2 步：最近音箱/智能屏播报
+      handoffTimers.push(
+        window.setTimeout(() => {
+          set((st) => ({ findOwner: { ...st.findOwner, step: 2 } }))
+          get().addEvent({ type: 'device_command', title: `${deviceName}播报提示`, detail: `${deviceName}播放：“主人，我在${roomName}找你～”`, petId: get().activePetId, roomId: get().pet.roomId })
+        }, 500),
+      )
+      // 第 3 步：App 推送已送达主人
+      handoffTimers.push(
+        window.setTimeout(() => {
+          set((st) => ({ findOwner: { ...st.findOwner, step: 3 } }))
+          get().toast('info', `📲 已推送到你的手机：${name}在${roomName}找你`)
+        }, 1200),
+      )
+      // 第 4 步：等待主人回应
+      handoffTimers.push(window.setTimeout(() => set((st) => ({ findOwner: { ...st.findOwner, step: 4 } })), 1900))
     },
+
+    clearFindOwner: () => set((st) => ({ findOwner: { ...st.findOwner, active: false, step: 0 } })),
 
     triggerLowMood: () => {
       const s = get()
-      set({ moodSignal: true, diaryText: generateDiaryText(true, Date.now()) })
+      set({ moodSignal: true, diarySeed: get().diarySeed + 1 })
       s.addEvent({ type: 'companion', title: `${s.pet.name}发来陪伴提醒`, detail: '“带我出去走走吧？” · 情绪陪伴已触发', petId: s.activePetId, roomId: s.pet.roomId })
       s.toast('info', '已生成宠物口吻陪伴提醒：带我出去走走吧～')
     },
@@ -716,7 +903,8 @@ export type PersistSlice = Pick<
   | 'lost'
   | 'companionEnabled'
   | 'moodSignal'
-  | 'diaryText'
+  | 'diarySeed'
+  | 'demoMode'
 >
 
 export function getSnapshot(): PersistSlice {
@@ -736,7 +924,8 @@ export function getSnapshot(): PersistSlice {
     lost: s.lost,
     companionEnabled: s.companionEnabled,
     moodSignal: s.moodSignal,
-    diaryText: s.diaryText,
+    diarySeed: s.diarySeed,
+    demoMode: s.demoMode,
   }
 }
 

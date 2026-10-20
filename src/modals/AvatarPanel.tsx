@@ -4,6 +4,7 @@ import { PetSvg } from '@/components/PetSvg'
 import { behaviorLabel, roomDevices } from '@/lib/tracking'
 import { relativeTime } from '@/lib/time'
 import { deviceIconOf } from '@/components/map/furniture'
+import { Icon, type IconName } from '@/components/Icon'
 
 export function AvatarPanel() {
   const modal = useStore((s) => s.modal)
@@ -25,13 +26,13 @@ export function AvatarPanel() {
   const speaker = roomDevs.find((d) => d.type === 'speaker')
   const feeder = devices.find((d) => d.type === 'feeder')
 
-  const actions: { label: string; onClick: () => void }[] = [
-    { label: '◉ 看看它', onClick: () => openCamera() },
-    { label: '🔊 叫它', onClick: () => sendCommand(speaker?.id ?? feeder?.id ?? pet.id, `呼叫${pet.name}提示音`) },
-    { label: '◖ 主人声音', onClick: () => sendCommand(speaker?.id ?? pet.id, '播放主人声音') },
-    { label: '▣ 视频互动', onClick: () => openCamera(true) },
-    { label: '🍽 投喂', onClick: () => sendCommand(feeder?.id ?? pet.id, '远程投喂 8g') },
-    { label: '✦ 逗宠', onClick: () => sendCommand(pet.id, '启动逗宠模组') },
+  const actions: { icon: IconName; label: string; onClick: () => void }[] = [
+    { icon: 'peek', label: '看看它', onClick: () => openCamera() },
+    { icon: 'call', label: '叫它', onClick: () => sendCommand(speaker?.id ?? feeder?.id ?? pet.id, `呼叫${pet.name}提示音`) },
+    { icon: 'voice', label: '主人声音', onClick: () => sendCommand(speaker?.id ?? pet.id, '播放主人声音') },
+    { icon: 'video', label: '视频互动', onClick: () => openCamera(true) },
+    { icon: 'feed', label: '投喂', onClick: () => sendCommand(feeder?.id ?? pet.id, '远程投喂 8g') },
+    { icon: 'play', label: '逗宠', onClick: () => sendCommand(pet.id, '启动逗宠模组') },
   ]
 
   return (
@@ -87,7 +88,7 @@ export function AvatarPanel() {
             <Box b={relativeTime(pet.lastUpdatedAt)} s="最近更新" />
           </div>
           <div className="text-xs text-muted">
-            定位依据：{pet.trackingSources.includes('camera') ? `${room?.name}摄像头 + 项圈 BLE` : '项圈 BLE + 最近摄像头辅助'} · 置信度 {Math.round(pet.confidence * 100)}%
+            定位依据：{pet.trackingSources.includes('camera') ? `${room?.name}摄像头 + 项圈信号` : '项圈信号 + 最近摄像头辅助'} · {pet.trackingSources.includes('camera') ? '视觉已确认' : '辅助定位中'}
           </div>
           {room && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -104,8 +105,9 @@ export function AvatarPanel() {
               <button
                 key={a.label}
                 onClick={a.onClick}
-                className="rounded-xl border border-line bg-white px-2 py-3 text-center text-xs font-bold text-[#53645e] hover:border-[#cde3dc] hover:bg-teal-soft hover:text-teal"
+                className="flex flex-col items-center gap-1 rounded-xl border border-line bg-white px-2 py-3 text-center text-xs font-bold text-[#53645e] hover:border-[#cde3dc] hover:bg-teal-soft hover:text-teal"
               >
+                <Icon name={a.icon} size={18} />
                 {a.label}
               </button>
             ))}
@@ -120,7 +122,7 @@ function Box({ b, s }: { b: string; s: string }) {
   return (
     <div className="rounded-xl bg-[#f1f6f3] px-2.5 py-2.5">
       <b className="block text-[13px]">{b}</b>
-      <span className="text-[10px] text-muted">{s}</span>
+      <span className="text-[12px] text-muted">{s}</span>
     </div>
   )
 }

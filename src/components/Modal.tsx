@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 
 export function Modal({
   open,
@@ -19,10 +19,18 @@ export function Modal({
   wide?: boolean
   testId?: string
 }) {
+  // Esc 关闭（§5.4 键盘可达性）
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   if (!open) return null
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-[rgba(24,42,38,.28)] p-6 backdrop-blur-md"
+      className="app-no-drag fixed inset-0 z-[120] flex items-center justify-center bg-[rgba(24,42,38,.28)] p-6 backdrop-blur-md"
       onClick={onClose}
     >
       <div

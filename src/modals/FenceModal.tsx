@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useStore, currentRoom } from '@/store/useStore'
 import { Modal } from '@/components/Modal'
 import { MAP_W, MAP_H, roomBounds, roomCentroid } from '@/domain/geometry'
+import { floorColor } from '@/components/map/furniture'
+import { drawFurniture, defaultFurniture } from '@/components/map/furnitureLib'
 import type { Point } from '@/domain/types'
 
 export function FenceModal() {
@@ -37,9 +39,18 @@ export function FenceModal() {
   const petCenter = room ? roomCentroid(room) : { x: 500, y: 300 }
 
   return (
-    <Modal open={open} onClose={close} wide eyebrow="SAFE ZONE · SYNC HOME MAP" title="虚拟栅栏" desc="直接同步当前家庭地图。点击地图添加围栏顶点，至少 3 点即可保存。" testId="fence-modal">
+    <Modal open={open} onClose={close} wide eyebrow="SAFE ZONE · SYNC HOME MAP" title="虚拟栅栏" desc="室内安全区域（非室外 GPS 电子围栏）。点击地图添加围栏顶点，至少 3 点即可保存。" testId="fence-modal">
+      {fence.needsReview && (
+        <div data-testid="fence-review" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#f0d9b8] bg-[#fff5e6] px-3.5 py-2.5 text-xs text-[#8a6530]">
+          <span><b>地图已更新</b>，你的自定义安全区域可能不再适用，请检查。</span>
+          <div className="flex gap-2">
+            <button className="btn" onClick={() => setFencePoints(fence.points)}>保留当前围栏</button>
+            <button className="btn btn-primary" onClick={() => fitFence()}>重新贴合全屋</button>
+          </div>
+        </div>
+      )}
       <div className="relative h-[420px] overflow-hidden rounded-[22px] border border-line bg-[#f4f7f4]">
-        <div data-testid="fence-sync-badge" className="absolute left-3.5 top-3.5 z-[3] rounded-full border border-line bg-white/95 px-2.5 py-1.5 text-[10px] font-extrabold text-teal shadow-softsm">
+        <div data-testid="fence-sync-badge" className="absolute left-3.5 top-3.5 z-[3] rounded-full border border-line bg-white/95 px-2.5 py-1.5 text-[12px] font-extrabold text-teal shadow-softsm">
           已同步当前地图 · {rooms.length} 个房间 · V{version}
         </div>
         <svg
@@ -60,8 +71,16 @@ export function FenceModal() {
             const b = roomBounds(r)
             return (
               <g key={r.id}>
-                <polygon points={r.polygon.map((p) => `${p.x},${p.y}`).join(' ')} fill="rgba(255,255,255,.88)" stroke="#c7d4ce" strokeWidth={5} style={{ vectorEffect: 'non-scaling-stroke' }} />
-                <text x={b.x + 14} y={b.y + 26} fontSize={17} fontWeight={800} fill="#84958e" style={{ pointerEvents: 'none' }}>{r.name}</text>
+                <polygon points={r.polygon.map((p) => `${p.x},${p.y}`).join(' ')} fill={floorColor(r.kind)} stroke="#7f9289" strokeWidth={7} strokeLinejoin="round" style={{ vectorEffect: 'non-scaling-stroke' }} />
+                <polygon points={r.polygon.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#c7d4ce" strokeWidth={2} style={{ vectorEffect: 'non-scaling-stroke' }} />
+                <g opacity={0.6} style={{ pointerEvents: 'none' }}>
+                  {(r.furniture ?? defaultFurniture(r)).map((f) => (
+                    <g key={f.id} transform={`translate(${f.x} ${f.y}) rotate(${f.rotation ?? 0} ${f.w / 2} ${f.h / 2})`}>
+                      {drawFurniture(f.type, f.w, f.h)}
+                    </g>
+                  ))}
+                </g>
+                <text x={b.x + 14} y={b.y + 24} fontSize={15} fontWeight={800} fill="#7c8d87" style={{ pointerEvents: 'none' }}>{r.name}</text>
               </g>
             )
           })}
@@ -88,7 +107,7 @@ export function FenceModal() {
         </svg>
       </div>
       <p className="mt-2.5 rounded-xl bg-[#eef6f2] px-3 py-2.5 text-[11px] leading-relaxed text-[#60746c]">
-        围栏与当前“已应用”的家庭地图使用同一份数据。点击空白增加边界点；拖动绿色圆点调整范围。修改户型并应用后，这里会自动同步新布局（V{version}）。
+        这是<b>室内</b>安全区域，用于判断宠物进入/离开已定义的室内监控范围；无室外定位数据时不代表宠物真实走出住宅。点击空白增加边界点，拖动绿点调整。自定义后的围栏不会因修改户型而被静默覆盖，仅在布局大改时提示复核。
       </p>
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         <button className="btn" onClick={() => setFencePoints(fence.points.slice(0, -1))}>撤销点</button>

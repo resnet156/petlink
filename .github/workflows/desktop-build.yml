@@ -1,0 +1,59 @@
+# 打 tag（v*）时构建 macOS / Windows / Linux 安装包，并由单个 release job 汇总发成一个正式 Release。
+# 采用「各平台只构建 → 统一上传 → 单次发布」模式，避免多平台并行 publish 产生重复草稿 / 空 Release。
+name: Desktop Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build desktop app (no publish)
+        run: npm run electron:dist
+        env:
+          # 云同步：把 Supabase 密钥注入构建，桌面 App 才能登录并与网页版跨设备同步。
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            release/PetLink-Desktop-*.dmg
+            release/PetLink-Desktop-*.exe
+            release/PetLink-Desktop-*.AppImage
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          make_latest: true
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

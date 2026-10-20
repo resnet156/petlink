@@ -75,19 +75,19 @@ export function AuthModal() {
             <b className="text-sm">家庭共享</b>
             {homeOwnerId && homeOwnerId !== user.id ? (
               <>
-                <p className="mt-1 text-xs text-muted">已加入家庭：<span className="break-all font-mono text-[10px]">{homeOwnerId}</span>，与该家庭共享同一份数据。</p>
+                <p className="mt-1 text-xs text-muted">已加入家庭：<span className="break-all font-mono text-[12px]">{homeOwnerId}</span>，与该家庭共享同一份数据。</p>
                 <button className="btn mt-2" onClick={async () => { await leaveHome(); toast('info', '已离开家庭，回到自己的家') }}>离开家庭</button>
               </>
             ) : (
               <>
                 <p className="mt-1 text-xs text-muted">把下面的「家庭 ID」发给家人，对方粘贴即可加入、共享你的宠物与户型数据。</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <input className="field !py-1.5 font-mono text-[10px]" readOnly value={user.id} aria-label="我的家庭ID" />
+                  <input className="field !py-1.5 font-mono text-[12px]" readOnly value={user.id} aria-label="我的家庭ID" />
                   <button className="btn !py-1.5" onClick={() => { void navigator.clipboard?.writeText(user.id); toast('success', '家庭 ID 已复制') }}>复制</button>
                 </div>
                 <label className="mb-1 mt-3 block text-[11px] text-muted">加入他人的家庭</label>
                 <div className="flex items-center gap-2">
-                  <input className="field !py-1.5 font-mono text-[10px]" data-testid="join-home-input" value={joinId} onChange={(e) => setJoinId(e.target.value)} placeholder="粘贴家庭 ID" />
+                  <input className="field !py-1.5 font-mono text-[12px]" data-testid="join-home-input" value={joinId} onChange={(e) => setJoinId(e.target.value)} placeholder="粘贴家庭 ID" />
                   <button className="btn btn-primary !py-1.5" data-testid="join-home-btn" onClick={async () => {
                     const ok = await joinHome(joinId)
                     toast(ok ? 'success' : 'error', ok ? '已加入家庭并同步数据' : (useAuth.getState().error || '加入失败'))
@@ -120,7 +120,7 @@ export function AuthModal() {
               忘记密码？发送重置邮件
             </button>
           )}
-          <p className="mt-2 text-[10px] leading-relaxed text-muted">首次登录会以云端数据为准；若云端为空，则用当前本地数据初始化云端。</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-muted">首次登录会以云端数据为准；若云端为空，则用当前本地数据初始化云端。</p>
         </div>
       )}
     </Modal>

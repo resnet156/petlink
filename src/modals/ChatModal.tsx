@@ -13,18 +13,66 @@ export function ChatModal() {
   const sendCommand = useStore((s) => s.sendCommand)
   const pet = useStore((s) => s.pet)
   const room = useStore(currentRoom)
+  const findOwner = useStore((s) => s.findOwner)
   const [text, setText] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 
   const lastOwnerPlayed = [...chat].reverse().find((m) => m.role === 'owner')?.played
 
+  const chainSteps = findOwner.active
+    ? [
+        { k: 1, label: `${findOwner.petName}在${findOwner.roomName}拨铃`, sub: '摄像头已确认停留在铃铛旁' },
+        { k: 2, label: `${findOwner.deviceName} 播报提示`, sub: `“主人，我在${findOwner.roomName}找你～”` },
+        { k: 3, label: '已推送到你的手机', sub: 'App Push · 含一键回应入口' },
+        { k: 4, label: '等待你的回应', sub: '看一眼实时画面 或 语音回应' },
+      ]
+    : []
+
   return (
-    <Modal open={open} onClose={close} eyebrow="PET DIALOG" title="毛球 🐱" desc="消息经当前房间最近的小度音箱 / 屏幕播放；发完可立即查看摄像头确认反应。" testId="chat-modal">
+    <Modal open={open} onClose={close} eyebrow="PET DIALOG" title={`${pet.name} 🐱`} desc="消息经当前房间最近的小度音箱 / 屏幕播放；发完可立即查看摄像头确认反应。" testId="chat-modal">
       <div className="mb-3 flex flex-wrap gap-1.5">
         <button className="btn" onClick={() => openCamera()}>◉ 实时摄像头</button>
         <button className="btn" onClick={() => sendCommand(pet.id, '播放主人声音')}>🔊 播放主人声音</button>
-        <button data-testid="bell-btn" className="btn" onClick={triggerBell}>🔔 模拟毛球拨铃</button>
+        <button data-testid="bell-btn" className="btn" onClick={triggerBell}>🔔 模拟{pet.name}拨铃</button>
       </div>
+
+      {findOwner.active && (
+        <div data-testid="find-owner-chain" className="mb-3 rounded-2xl border border-[#e7dcc0] bg-[#fff8ea] p-3.5">
+          <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-[#8a6d35]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#e0a53c]" /> {pet.name}主动找人 · 实时链路
+          </div>
+          <div className="flex flex-col gap-0">
+            {chainSteps.map((st, i) => {
+              const done = findOwner.step > st.k
+              const active = findOwner.step === st.k
+              return (
+                <div key={st.k} className="flex gap-2.5">
+                  <div className="flex flex-col items-center">
+                    <span
+                      className={`grid h-5 w-5 place-items-center rounded-full text-[12px] font-bold ${
+                        done ? 'bg-teal text-white' : active ? 'bg-[#e0a53c] text-white' : 'bg-[#ece4d2] text-[#b09c73]'
+                      }`}
+                    >
+                      {done ? '✓' : st.k}
+                    </span>
+                    {i < chainSteps.length - 1 && <span className={`my-0.5 w-0.5 flex-1 ${done ? 'bg-teal/50' : 'bg-[#e5dcc6]'}`} style={{ minHeight: 14 }} />}
+                  </div>
+                  <div className={`pb-2 ${done || active ? '' : 'opacity-45'}`}>
+                    <b className="block text-[12px] text-[#4a3f28]">{st.label}</b>
+                    <span className="text-[11px] text-[#9b8a63]">{st.sub}</span>
+                    {active && st.k === 4 && (
+                      <div className="mt-1.5 flex gap-1.5">
+                        <button className="btn btn-primary" data-testid="chain-peek" onClick={() => openCamera()}>◉ 看一眼</button>
+                        <button className="btn" onClick={() => sendCommand(pet.id, `通过${findOwner.deviceName}回应${pet.name}`)}>🎙 语音回应</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex h-[400px] flex-col overflow-hidden rounded-[22px] border border-line bg-[#f5f8f5]">
         <div className="flex flex-1 flex-col gap-2.5 overflow-auto p-4">
@@ -35,7 +83,7 @@ export function ChatModal() {
                   <b className="mb-1 block">🔔 {timeHM(m.timestamp)} {m.text}</b>
                   <div className="mt-2 flex gap-1.5">
                     <button className="btn btn-primary" onClick={() => openCamera()}>立即看一眼</button>
-                    <button className="btn" onClick={() => sendCommand(pet.id, `通过${room?.name ?? '当前房间'}小度回应毛球`)}>语音回应</button>
+                    <button className="btn" onClick={() => sendCommand(pet.id, `通过${room?.name ?? '当前房间'}小度回应${pet.name}`)}>语音回应</button>
                   </div>
                 </div>
               )
